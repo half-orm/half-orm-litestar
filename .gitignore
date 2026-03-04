@@ -209,3 +209,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 tmp
+
+.auto_venv
+.coveragerc
+.half_orm_cli
