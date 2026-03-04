@@ -11,7 +11,7 @@ dependencies = [
 ]
 description = "Litestar API generation for halfORM projects."
 readme = "README.md"
-keywords = ["postgres", "relation-object mapping"]
+keywords = ["litestar", "half-orm", "rest", "api", "postgresql", "code-generation", "asgi", "orm"]
 authors = [
     {name = "Joël Maïzi", email = "joel.maizi@collorg.org"}
 ]
