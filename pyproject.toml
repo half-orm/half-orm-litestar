@@ -4,7 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "half_orm_litestar"
-dynamic = ["version", "dependencies"]
+dynamic = ["version"]
+dependencies = [
+    "half-orm>=0.17.0,<0.18",
+    "litestar>=2.0.0",
+]
 description = "Litestar API generation for halfORM projects."
 readme = "README.md"
 keywords = ["postgres", "relation-object mapping"]
