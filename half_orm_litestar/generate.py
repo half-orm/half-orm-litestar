@@ -42,7 +42,7 @@ from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR
 from litestar.logging import LoggingConfig
 from dataclasses import dataclass, field
 
-from {module} import ho_dataclasses
+from {module} import ho_baseclasses
 from api import guards
 
 try:
@@ -83,7 +83,7 @@ _IMPORT_TEMPLATE = "\nfrom {schema} import {module_name} as {module_alias}\n"
 
 _GET_TEMPLATE = """
 @get({litestar_args})
-async def {full_name}({query_params}) -> typing.List[ho_dataclasses.{dc_name}]:
+async def {full_name}({query_params}) -> typing.List[ho_baseclasses.{dc_name}]:
     return await {module_alias}.{class_name}().{name}({params})
 
 application.register({full_name})
@@ -91,7 +91,7 @@ application.register({full_name})
 
 _POST_TEMPLATE = """
 @post({litestar_args})
-async def {full_name}({query_params}) -> ho_dataclasses.{dc_name}:
+async def {full_name}({query_params}) -> ho_baseclasses.{dc_name}:
     return await {module_alias}.{class_name}().{name}({params})
 
 application.register({full_name})
@@ -99,7 +99,7 @@ application.register({full_name})
 
 _PATCH_TEMPLATE = """
 @patch({litestar_args})
-async def {full_name}(request: "Request", data: ho_dataclasses.{dc_name}) -> ho_dataclasses.{dc_name}:
+async def {full_name}(request: "Request", data: ho_baseclasses.{dc_name}) -> ho_baseclasses.{dc_name}:
     return await {module_alias}.{class_name}().{name}({params})
 
 application.register({full_name})
@@ -107,7 +107,7 @@ application.register({full_name})
 
 _PUT_TEMPLATE = """
 @put({litestar_args})
-async def {full_name}(request: "Request", {path_params}) -> ho_dataclasses.{dc_name}:
+async def {full_name}(request: "Request", {path_params}) -> ho_baseclasses.{dc_name}:
     return await {module_alias}.{class_name}().{name}({params})
 
 application.register({full_name})

@@ -453,7 +453,7 @@ class TestGenApi:
             )
 
         content = (tmp_path / 'api' / 'main.py').read_text()
-        assert 'from mydb import ho_dataclasses' in content
+        assert 'from mydb import ho_baseclasses' in content
         assert 'application = Litestar(' in content
 
     def test_generate_scaffolds_missing_api_files(self, tmp_path):
