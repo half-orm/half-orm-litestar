@@ -2,7 +2,7 @@
 Litestar API generator for halfORM projects.
 
 Scans all halfORM Relation subclasses in the project for methods decorated
-with ``@tools.api_*`` and produces ``api/main.py``.
+with ``@tools.api_*`` and produces ``api/app.py``.
 """
 
 import importlib
@@ -18,7 +18,7 @@ from half_orm.relation import Relation
 
 
 # ---------------------------------------------------------------------------
-# Templates for the generated main.py
+# Templates for the generated app.py
 # ---------------------------------------------------------------------------
 
 _HEADER_TEMPLATE = """\
@@ -186,7 +186,7 @@ def _scaffold_api_dir(api_dir: Path) -> None:
 
 class GenApi:
     """
-    Generate ``api/main.py`` from halfORM Relation classes decorated with
+    Generate ``api/app.py`` from halfORM Relation classes decorated with
     ``@tools.api_*``.
 
     Parameters
@@ -432,7 +432,7 @@ class GenApi:
         print(f'\nScaffolding {self._api_dir} ...')
         _scaffold_api_dir(self._api_dir)
 
-        # Write main.py
+        # Write app.py
         route_handlers_str = ', '.join(route_handlers)
         output = (
             _HEADER_TEMPLATE.format(module=self._module_name)
@@ -446,6 +446,6 @@ class GenApi:
             )
         )
 
-        main_py = self._api_dir / 'main.py'
+        main_py = self._api_dir / 'app.py'
         main_py.write_text(output, encoding='utf-8')
         print(f'\nGenerated {main_py}')

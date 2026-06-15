@@ -74,12 +74,12 @@ This command:
 1. Scans all halfORM relation classes for `@api_*` decorated methods.
 2. Creates missing scaffolding files in `api/` (only on first run — existing
    files are never overwritten).
-3. Writes `api/main.py`, the ready-to-run Litestar application.
+3. Writes `api/app.py`, the ready-to-run Litestar application.
 
 ### 3. Run the API
 
 ```bash
-uvicorn api.main:application --reload
+uvicorn api.app:application --reload
 ```
 
 ---
@@ -91,7 +91,7 @@ myproject/
 ├── api/
 │   ├── __init__.py
 │   ├── guards.py                        ← authentication guards (edit this)
-│   ├── main.py                          ← generated, do not edit by hand
+│   ├── app.py                          ← generated, do not edit by hand
 │   └── custom/
 │       ├── __init__.py
 │       ├── routes.py                    ← hand-written extra routes
@@ -100,8 +100,8 @@ myproject/
 │           └── authorization.py        ← authentication middleware (edit this)
 ```
 
-Files in `api/` (except `main.py`) are created once and never overwritten.
-Regenerating only rewrites `main.py`.
+Files in `api/` (except `app.py`) are created once and never overwritten.
+Regenerating only rewrites `app.py`.
 
 ---
 

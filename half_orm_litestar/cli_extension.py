@@ -44,7 +44,7 @@ def add_commands(main_group):
         help='Bump the API version to N+1 (asks for confirmation).',
     )
     def generate(dry_run, bump):
-        """Generate api/main.py from @api_* decorated halfORM methods.
+        """Generate api/app.py from @api_* decorated halfORM methods.
 
         The API version is read from api/.api_version (default: 0).
         Use --bump to move to N+1; the new value is saved for future runs.
@@ -87,7 +87,7 @@ def add_commands(main_group):
 
         if dry_run:
             click.echo(
-                f'[dry-run] would generate api/main.py for project: {repo.name}'
+                f'[dry-run] would generate api/app.py for project: {repo.name}'
                 f' (v{api_version})'
             )
             return

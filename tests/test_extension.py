@@ -84,7 +84,7 @@ class TestCLI:
         result = self.runner.invoke(self.cli, ['litestar', 'generate', '--help'])
         assert result.exit_code == 0
         assert '--dry-run' in result.output
-        assert 'api/main.py' in result.output
+        assert 'api/app.py' in result.output
 
     def test_generate_dry_run(self):
         repo = _make_mock_repo(name='mydb')
@@ -100,7 +100,7 @@ class TestCLI:
             with patch('half_orm_litestar.generate.GenApi') as mock_genapi:
                 result = self.runner.invoke(self.cli, ['litestar', 'generate'])
         assert result.exit_code == 0
-        mock_genapi.assert_called_once_with(repo)
+        mock_genapi.assert_called_once_with(repo, api_version=0)
 
     def test_generate_no_half_orm_dev(self):
         """Generate should fail gracefully when half_orm_dev is not installed."""
@@ -298,11 +298,12 @@ class TestScaffolding:
 class TestGenApiHelpers:
     """Unit tests for GenApi formatting helpers (no filesystem, no relations)."""
 
-    def _make_gen(self, module_name='mydb'):
+    def _make_gen(self, module_name='mydb', api_version=None):
         """Instantiate GenApi bypassing the actual generate() call."""
         from half_orm_litestar.generate import GenApi
         obj = object.__new__(GenApi)
         obj._module_name = module_name
+        obj._api_version = api_version
         obj._base_dir = Path('/tmp/fake')
         obj._api_dir = Path('/tmp/fake/api')
         obj._classes = []
@@ -335,18 +336,23 @@ class TestGenApiHelpers:
     def test_query_params_with_annotation_and_default(self):
         gen = self._make_gen()
 
-        def fn(self, name: 'str', limit: 'int' = 10): pass
+        def fn(self, name: str, limit: int = 10): pass
 
         sig = inspect.signature(fn)
         decl, call = gen._query_params(sig)
-        assert 'name: "str"' in decl
-        assert 'limit: "int"=10' in decl
+        assert 'name: str' in decl
+        assert 'limit: int=10' in decl
         assert call == 'name, limit'
 
-    def test_format_litestar_args_path_prefixed(self):
-        gen = self._make_gen(module_name='mydb')
+    def test_format_litestar_args_path(self):
+        gen = self._make_gen()
         result = gen._format_litestar_args({'path': '/user/{id: uuid}'}, [], '')
-        assert '"/mydb/user/{id: uuid}"' in result
+        assert '"/user/{id: uuid}"' in result
+
+    def test_format_litestar_args_path_with_version(self):
+        gen = self._make_gen(api_version=1)
+        result = gen._format_litestar_args({'path': '/user/{id: uuid}'}, [], '')
+        assert '"/v1/user/{id: uuid}"' in result
 
     def test_format_litestar_args_guards(self):
         gen = self._make_gen()
@@ -396,7 +402,7 @@ class TestGenApi:
         attrs.update(methods)
         return type(class_name, (), attrs)
 
-    def test_generate_creates_main_py(self, tmp_path):
+    def test_generate_creates_app_py(self, tmp_path):
         from half_orm_litestar.generate import GenApi
         from half_orm_litestar import tools
 
@@ -415,10 +421,9 @@ class TestGenApi:
                 base_dir=str(tmp_path),
             )
 
-        main_py = tmp_path / 'api' / 'main.py'
-        assert main_py.exists()
+        assert (tmp_path / 'api' / 'app.py').exists()
 
-    def test_generated_main_py_contains_route(self, tmp_path):
+    def test_generated_app_py_contains_route(self, tmp_path):
         from half_orm_litestar.generate import GenApi
         from half_orm_litestar import tools
 
@@ -437,12 +442,12 @@ class TestGenApi:
                 base_dir=str(tmp_path),
             )
 
-        content = (tmp_path / 'api' / 'main.py').read_text()
+        content = (tmp_path / 'api' / 'app.py').read_text()
         assert '@get' in content
-        assert '/mydb/users' in content
+        assert '"/users"' in content
         assert 'mydb_actor_user_get_users' in content
 
-    def test_generated_main_py_has_header(self, tmp_path):
+    def test_generated_app_py_has_header(self, tmp_path):
         from half_orm_litestar.generate import GenApi
 
         with patch('importlib.import_module', return_value=Mock(spec=[])):
@@ -452,7 +457,7 @@ class TestGenApi:
                 base_dir=str(tmp_path),
             )
 
-        content = (tmp_path / 'api' / 'main.py').read_text()
+        content = (tmp_path / 'api' / 'app.py').read_text()
         assert 'from mydb import ho_baseclasses' in content
         assert 'application = Litestar(' in content
 
@@ -486,14 +491,14 @@ class TestGenApi:
 
         assert guards_py.read_text() == '# project-specific guards'
 
-    def test_generate_overwrites_main_py(self, tmp_path):
-        """main.py is always regenerated, even if it already exists."""
+    def test_generate_overwrites_app_py(self, tmp_path):
+        """app.py is always regenerated, even if it already exists."""
         from half_orm_litestar.generate import GenApi
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()
-        main_py = api_dir / 'main.py'
-        main_py.write_text('# old content')
+        app_py = api_dir / 'app.py'
+        app_py.write_text('# old content')
 
         with patch('importlib.import_module', return_value=Mock(spec=[])):
             GenApi(
@@ -502,7 +507,7 @@ class TestGenApi:
                 base_dir=str(tmp_path),
             )
 
-        assert main_py.read_text() != '# old content'
+        assert app_py.read_text() != '# old content'
 
 
 if __name__ == '__main__':
