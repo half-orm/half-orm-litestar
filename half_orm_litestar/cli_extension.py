@@ -95,3 +95,16 @@ def add_commands(main_group):
         from half_orm_litestar.generate import GenApi
         click.echo(f'Generating Litestar API for project: {repo.name} (v{api_version})')
         GenApi(repo, api_version=api_version)
+
+    @litestar.command()
+    @click.option('--reload', is_flag=True, default=False, help='Enable auto-reload on file changes.')
+    @click.option('--debug', is_flag=True, default=False, help='Enable Litestar debug mode.')
+    def run(reload, debug):
+        """Run the Litestar app from api/app.py (development helper)."""
+        import subprocess
+        cmd = ['litestar', '--app', 'api.app:application', 'run']
+        if reload:
+            cmd.append('--reload')
+        if debug:
+            cmd.append('--debug')
+        sys.exit(subprocess.call(cmd))

@@ -75,10 +75,9 @@ logging_config = LoggingConfig(
 
 _FOOTER_TEMPLATE = """
 application = Litestar(
-    route_handlers=[{route_handlers}],
+    route_handlers=[{route_handlers}] + routes,
     middleware=_auth_middleware + middlewares,
     logging_config=logging_config,{openapi_config}
-    debug=True,
 )
 """
 
