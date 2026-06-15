@@ -40,6 +40,7 @@ from litestar import Request, Litestar, get, post, patch, put, delete, Response,
 from litestar.exceptions import HTTPException
 from litestar.status_codes import HTTP_500_INTERNAL_SERVER_ERROR
 from litestar.logging import LoggingConfig
+from litestar.openapi import OpenAPIConfig
 from dataclasses import dataclass, field
 
 from {module} import ho_baseclasses
@@ -76,10 +77,13 @@ _FOOTER_TEMPLATE = """
 application = Litestar(
     route_handlers=[{route_handlers}],
     middleware=_auth_middleware + middlewares,
-    logging_config=logging_config,
+    logging_config=logging_config,{openapi_config}
     debug=True,
 )
 """
+
+_OPENAPI_CONFIG_SNIPPET = """
+    openapi_config=OpenAPIConfig(title="{title}", version="{version}"),"""
 
 _IMPORT_TEMPLATE = "\nfrom {schema} import {module_name} as {module_alias}\n"
 
@@ -209,6 +213,7 @@ class GenApi:
         relation_classes: Iterable[Tuple[Type[Relation], str]] | None = None,
         module_name: str | None = None,
         base_dir: str | None = None,
+        api_version: str | None = None,
     ):
         if repo is not None:
             self._module_name = repo.name
@@ -223,6 +228,7 @@ class GenApi:
             self._base_dir = Path(base_dir)
             self._classes = relation_classes
 
+        self._api_version = api_version
         self._api_dir = self._base_dir / 'api'
         self._generate()
 
@@ -271,7 +277,8 @@ class GenApi:
 
         # Path is always first positional argument
         if 'path' in litestar_params:
-            full_path = f"/{self._module_name}{litestar_params['path']}"
+            version_prefix = f'/v{self._api_version}' if self._api_version is not None else ''
+            full_path = f"{version_prefix}/{self._module_name}{litestar_params['path']}"
             args.append(f'"{full_path}"')
 
         kwargs = []
@@ -430,7 +437,13 @@ class GenApi:
         output = (
             _HEADER_TEMPLATE.format(module=self._module_name)
             + ''.join(blocks)
-            + _FOOTER_TEMPLATE.format(route_handlers=route_handlers_str)
+            + _FOOTER_TEMPLATE.format(
+                route_handlers=route_handlers_str,
+                openapi_config=_OPENAPI_CONFIG_SNIPPET.format(
+                    title=self._module_name,
+                    version=f'v{self._api_version}',
+                ) if self._api_version is not None else '',
+            )
         )
 
         main_py = self._api_dir / 'main.py'
