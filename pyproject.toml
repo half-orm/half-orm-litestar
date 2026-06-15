@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "half_orm_litestar"
 dynamic = ["version"]
 dependencies = [
-    "half-orm>=0.17.0,<0.18",
+    "half-orm>=1.0.0,<1.1",
     "litestar>=2.0.0",
 ]
 description = "Litestar API generation for halfORM projects."
