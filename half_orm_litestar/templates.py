@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 from {module} import ho_baseclasses
 from {module} import ho_typeddicts
+from {module} import MODEL
 from api import guards
 
 try:
@@ -56,10 +57,14 @@ logging_config = LoggingConfig(
 """
 
 FOOTER = """
+async def _ho_startup() -> None:
+    await MODEL.aconnect()
+
 application = Litestar(
     route_handlers=[{route_handlers}] + routes,
     middleware=_auth_middleware + middlewares,
-    logging_config=logging_config,{openapi_config}
+    logging_config=logging_config,
+    on_startup=[_ho_startup],{openapi_config}
 )
 """
 
@@ -211,11 +216,9 @@ async def {handler_name}(
         projection = [f for f in fields if not authorized or f in authorized]
     else:
         projection = authorized
-    return [
-        row async for row in {module_alias}.{class_name}(**filter_kwargs).ho_aselect(
-            *projection, limit=limit, offset=offset
-        )
-    ]
+    return await {module_alias}.{class_name}(**filter_kwargs).ho_aselect(
+        *projection, limit=limit, offset=offset
+    )
 """
 
 CRUD_GET_ONE = """
@@ -226,7 +229,7 @@ async def {handler_name}_get(
 ) -> {out_typedict}:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", getattr(request.state, "authorized_roles", []), api_excluded)
-    rows = [row async for row in {module_alias}.{class_name}({pk_field}=id).ho_aselect(*authorized)]
+    rows = await {module_alias}.{class_name}({pk_field}=id).ho_aselect(*authorized)
     if not rows:
         raise HTTPException(status_code=404)
     return rows[0]
