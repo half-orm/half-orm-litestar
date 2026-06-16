@@ -80,6 +80,20 @@ def _typedict_name(relation) -> str:
     return f'{schema_cap}{table_cap}Dict'
 
 
+def _access_description(crud_access: dict, verb: str) -> str:
+    """Format CRUD_ACCESS role/field info for a verb as an OpenAPI description."""
+    roles = crud_access.get(verb, {})
+    if not roles:
+        return ""
+    lines = ["**Access**"]
+    for role, fields in roles.items():
+        if fields is None:
+            lines.append(f"- {role}: all fields")
+        else:
+            lines.append(f"- {role}: {', '.join(fields)}")
+    return "\\n".join(lines)
+
+
 def _validate_crud_access(crud_access: dict, module_str: str) -> None:
     """Warn about known misconfiguration patterns in CRUD_ACCESS."""
     valid_verbs = {'GET', 'POST', 'PUT', 'PATCH', 'DELETE'}
@@ -139,6 +153,8 @@ def generate_crud_routes(
 
         filter_params, filter_dict = _filter_params_str(relation)
 
+        get_desc = _access_description(crud_access, 'GET')
+
         # GET list — always generated (tables and views)
         if (module_str, 'GET') not in covered and 'GET' in crud_access:
             handler_name = f'{handler_prefix}_list'
@@ -150,6 +166,7 @@ def generate_crud_routes(
                 module_alias=module_alias,
                 class_name=relation.__name__,
                 typedict_name=td_name,
+                access_description=get_desc,
             ))
             route_handlers.append(handler_name)
 
@@ -166,6 +183,7 @@ def generate_crud_routes(
                 module_alias=module_alias,
                 class_name=relation.__name__,
                 typedict_name=td_name,
+                access_description=get_desc,
             ))
             route_handlers.append(handler_name)
 
@@ -181,6 +199,7 @@ def generate_crud_routes(
                     module_alias=module_alias,
                     class_name=relation.__name__,
                     typedict_name=td_name,
+                    access_description=_access_description(crud_access, 'POST'),
                 ))
                 route_handlers.append(handler_name)
 
@@ -195,6 +214,7 @@ def generate_crud_routes(
                     module_alias=module_alias,
                     class_name=relation.__name__,
                     typedict_name=td_name,
+                    access_description=_access_description(crud_access, 'PUT'),
                 ))
                 route_handlers.append(handler_name)
 
@@ -209,6 +229,7 @@ def generate_crud_routes(
                     module_alias=module_alias,
                     class_name=relation.__name__,
                     typedict_name=td_name,
+                    access_description=_access_description(crud_access, 'DELETE'),
                 ))
                 route_handlers.append(handler_name)
 

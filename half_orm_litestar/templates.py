@@ -142,7 +142,7 @@ def _writable_fields(data: dict, crud_access: dict, verb: str, authorized_roles:
 CRUD_MODULE_IMPORT = "\nfrom {schema} import {module_name} as {module_alias}\n"
 
 CRUD_GET_LIST = """
-@get("{path}")
+@get("{path}", description="{access_description}")
 async def {handler_name}(
     request: Request,
 {filter_params}    fields: Optional[List[str]] = None,
@@ -163,7 +163,7 @@ async def {handler_name}(
 """
 
 CRUD_GET_ONE = """
-@get("{path}/{{id: {pk_path_type}}}")
+@get("{path}/{{id: {pk_path_type}}}", description="{access_description}")
 async def {handler_name}_get(
     request: Request,
     id: {pk_py_type},
@@ -176,7 +176,7 @@ async def {handler_name}_get(
 """
 
 CRUD_POST = """
-@post("{path}")
+@post("{path}", description="{access_description}")
 async def {handler_name}_create(
     request: Request,
     data: ho_typeddicts.{typedict_name},
@@ -186,7 +186,7 @@ async def {handler_name}_create(
 """
 
 CRUD_PUT = """
-@put("{path}/{{id: {pk_path_type}}}")
+@put("{path}/{{id: {pk_path_type}}}", description="{access_description}")
 async def {handler_name}_update(
     request: Request,
     id: {pk_py_type},
@@ -201,7 +201,7 @@ async def {handler_name}_update(
 """
 
 CRUD_DELETE = """
-@delete("{path}/{{id: {pk_path_type}}}")
+@delete("{path}/{{id: {pk_path_type}}}", description="{access_description}")
 async def {handler_name}_delete(
     request: Request,
     id: {pk_py_type},
