@@ -239,7 +239,7 @@ class TestTools:
 class TestScaffolding:
 
     def test_creates_all_expected_files(self, tmp_path):
-        from half_orm_litestar.generate import _scaffold_api_dir
+        from half_orm_litestar.scaffold import scaffold_api_dir as _scaffold_api_dir
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()
@@ -253,7 +253,7 @@ class TestScaffolding:
         assert (api_dir / 'custom' / 'middlewares' / 'authorization.py').exists()
 
     def test_guards_py_contains_public_and_connected(self, tmp_path):
-        from half_orm_litestar.generate import _scaffold_api_dir
+        from half_orm_litestar.scaffold import scaffold_api_dir as _scaffold_api_dir
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()
@@ -264,7 +264,7 @@ class TestScaffolding:
         assert 'async def connected' in content
 
     def test_does_not_overwrite_existing_files(self, tmp_path):
-        from half_orm_litestar.generate import _scaffold_api_dir
+        from half_orm_litestar.scaffold import scaffold_api_dir as _scaffold_api_dir
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()
@@ -278,7 +278,7 @@ class TestScaffolding:
         assert guards_py.read_text() == '# my custom guards'
 
     def test_partial_scaffold_fills_missing_only(self, tmp_path):
-        from half_orm_litestar.generate import _scaffold_api_dir
+        from half_orm_litestar.scaffold import scaffold_api_dir as _scaffold_api_dir
 
         api_dir = tmp_path / 'api'
         api_dir.mkdir()
@@ -296,92 +296,74 @@ class TestScaffolding:
 # ---------------------------------------------------------------------------
 
 class TestGenApiHelpers:
-    """Unit tests for GenApi formatting helpers (no filesystem, no relations)."""
+    """Unit tests for route-generation helpers (api_routes module)."""
 
-    def _make_gen(self, module_name='mydb', api_version=None):
-        """Instantiate GenApi bypassing the actual generate() call."""
-        from half_orm_litestar.generate import GenApi
-        obj = object.__new__(GenApi)
-        obj._module_name = module_name
-        obj._api_version = api_version
-        obj._base_dir = Path('/tmp/fake')
-        obj._api_dir = Path('/tmp/fake/api')
-        obj._classes = []
-        return obj
+    def setup_method(self):
+        from half_orm_litestar.api_routes import (
+            _path_params, _query_params, _format_litestar_args,
+            _extract_guards,
+        )
+        self._path_params = _path_params
+        self._query_params = _query_params
+        self._format_litestar_args = _format_litestar_args
+        self._extract_guards = _extract_guards
 
     def test_path_params_single(self):
-        gen = self._make_gen()
-        result = gen._path_params('/items/{id: uuid}')
-        assert result == 'id: Any'
+        assert self._path_params('/items/{id: uuid}') == 'id: Any'
 
     def test_path_params_multiple(self):
-        gen = self._make_gen()
-        result = gen._path_params('/post/{post_id: uuid}/user/{user_id: uuid}')
+        result = self._path_params('/post/{post_id: uuid}/user/{user_id: uuid}')
         assert 'post_id: Any' in result
         assert 'user_id: Any' in result
 
     def test_path_params_none(self):
-        gen = self._make_gen()
-        assert gen._path_params('/items') == ''
+        assert self._path_params('/items') == ''
 
     def test_query_params_skips_self(self):
-        gen = self._make_gen()
         sig = inspect.signature(lambda self, x: None)
-        decl, call = gen._query_params(sig)
+        decl, call = self._query_params(sig)
         assert 'self' not in decl
         assert 'self' not in call
         assert 'x' in decl
         assert 'x' in call
 
     def test_query_params_with_annotation_and_default(self):
-        gen = self._make_gen()
-
         def fn(self, name: str, limit: int = 10): pass
 
         sig = inspect.signature(fn)
-        decl, call = gen._query_params(sig)
+        decl, call = self._query_params(sig)
         assert 'name: str' in decl
         assert 'limit: int=10' in decl
         assert call == 'name, limit'
 
     def test_format_litestar_args_path(self):
-        gen = self._make_gen()
-        result = gen._format_litestar_args({'path': '/user/{id: uuid}'}, [], '')
+        result = self._format_litestar_args({'path': '/user/{id: uuid}'}, [], '', None)
         assert '"/user/{id: uuid}"' in result
 
     def test_format_litestar_args_path_with_version(self):
-        gen = self._make_gen(api_version=1)
-        result = gen._format_litestar_args({'path': '/user/{id: uuid}'}, [], '')
+        result = self._format_litestar_args({'path': '/user/{id: uuid}'}, [], '', 1)
         assert '"/v1/user/{id: uuid}"' in result
 
     def test_format_litestar_args_guards(self):
-        gen = self._make_gen()
-        result = gen._format_litestar_args({'path': '/items'}, ['public', 'connected'], '')
+        result = self._format_litestar_args({'path': '/items'}, ['public', 'connected'], '', None)
         assert 'guards=[guards.public, guards.connected]' in result
 
     def test_format_litestar_args_description(self):
-        gen = self._make_gen()
-        result = gen._format_litestar_args({'path': '/items'}, [], 'My description.')
+        result = self._format_litestar_args({'path': '/items'}, [], 'My description.', None)
         assert 'My description.' in result
 
     def test_extract_guards_string_list(self):
-        from half_orm_litestar.generate import GenApi
-        result = GenApi._extract_guards({'guards': ['public', 'connected']})
-        assert result == ['public', 'connected']
+        assert self._extract_guards({'guards': ['public', 'connected']}) == ['public', 'connected']
 
     def test_extract_guards_callable_list(self):
-        from half_orm_litestar.generate import GenApi
-
         def public(): pass
         def connected(): pass
 
-        result = GenApi._extract_guards({'guards': [public, connected]})
-        assert result == ['public', 'connected']
+        assert self._extract_guards({'guards': [public, connected]}) == ['public', 'connected']
 
     def test_extract_guards_empty(self):
-        from half_orm_litestar.generate import GenApi
-        assert GenApi._extract_guards({}) == []
-        assert GenApi._extract_guards({'guards': None}) == []
+        assert self._extract_guards({}) == []
+        assert self._extract_guards({'guards': None}) == []
 
 
 # ---------------------------------------------------------------------------
