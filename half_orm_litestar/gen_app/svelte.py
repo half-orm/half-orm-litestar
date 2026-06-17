@@ -150,35 +150,51 @@ class AuthState {
 export const auth = new AuthState();
 """
 
-_LOGIN_PAGE = """\
+def _login_page(version_prefix: str) -> str:
+    return f"""\
 <script lang="ts">
-  import { auth } from '$lib/auth.svelte.ts';
-  import { goto } from '$app/navigation';
+  import {{ auth }} from '$lib/auth.svelte.ts';
+  import {{ goto }} from '$app/navigation';
+  import {{ onMount }} from 'svelte';
 
-  let tokenInput = $state('');
+  let roles   = $state<string[]>([]);
+  let loading = $state(true);
+  let error   = $state('');
 
-  function handleLogin() {
-    if (tokenInput.trim()) {
-      auth.login(tokenInput.trim());
-      goto('/');
-    }
-  }
+  onMount(() => {{
+    fetch('{version_prefix}/ho_roles')
+      .then(r => {{ if (!r.ok) throw new Error(r.statusText); return r.json(); }})
+      .then(d  => {{ roles = d; loading = false; }})
+      .catch(e => {{ error = e.message; loading = false; }});
+  }});
+
+  function selectRole(role: string) {{
+    auth.login(role);
+    goto('/');
+  }}
 </script>
 
-<div class="max-w-md mx-auto mt-12 p-6 bg-white rounded-lg shadow">
-  <h1 class="text-2xl font-bold mb-6">Login</h1>
-  <p class="text-sm text-gray-600 mb-4">Paste your JWT token:</p>
-  <textarea
-    bind:value={tokenInput}
-    class="w-full h-32 border rounded p-2 font-mono text-sm mb-4"
-    placeholder="eyJ..."
-  ></textarea>
-  <button
-    onclick={handleLogin}
-    class="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
-  >
-    Login
-  </button>
+<div class="max-w-sm mx-auto mt-16 p-6 bg-white rounded-lg shadow">
+  <h1 class="text-xl font-bold mb-2">Select a role</h1>
+  <p class="text-xs text-gray-400 mb-6">Dev mode — the role name is used as bearer token.</p>
+
+  {{#if loading}}
+    <p class="text-gray-400 text-sm">Loading roles…</p>
+  {{:else if error}}
+    <p class="text-red-500 text-sm">{{error}}</p>
+  {{:else if roles.length === 0}}
+    <p class="text-gray-500 text-sm">No roles found.</p>
+  {{:else}}
+    <div class="space-y-2">
+      {{#each roles as role}}
+        <button onclick={{() => selectRole(role)}}
+                class="w-full text-left px-4 py-3 border rounded hover:bg-blue-50
+                       hover:border-blue-300 transition-colors text-sm font-medium">
+          {{role}}
+        </button>
+      {{/each}}
+    </div>
+  {{/if}}
 </div>
 """
 
@@ -188,6 +204,110 @@ _HOME_PAGE = """\
   import {{ onMount }} from 'svelte';
   onMount(() => goto('{first_route}'));
 </script>
+"""
+
+def _access_page(version_prefix: str) -> str:
+    return f"""\
+<script lang="ts">
+  import {{ auth }} from '$lib/auth.svelte.ts';
+  import {{ hoAccess }} from '$lib/stores/index.svelte.ts';
+  import {{ onMount }} from 'svelte';
+
+  let roles        = $state<string[]>([]);
+  let access       = $state<Record<string, any>>({{}});
+  let rolesLoading = $state(true);
+  let loading      = $state(true);
+
+  const activeRole = $derived(auth.token ?? 'public');
+
+  onMount(() => {{
+    fetch('{version_prefix}/ho_roles')
+      .then(r => r.json())
+      .then(d => {{ roles = d; rolesLoading = false; }});
+  }});
+
+  $effect(() => {{
+    loading = true;
+    hoAccess(auth.token ?? undefined)
+      .then(a => {{ access = a; loading = false; }})
+      .catch(() => {{ loading = false; }});
+  }});
+
+  function selectRole(role: string) {{
+    if (role === 'public') {{
+      auth.logout();
+    }} else {{
+      auth.login(role);
+    }}
+  }}
+
+  const VERB_COLOR: Record<string, string> = {{
+    GET:    'bg-blue-100 text-blue-700',
+    POST:   'bg-green-100 text-green-700',
+    PUT:    'bg-yellow-100 text-yellow-700',
+    DELETE: 'bg-red-100 text-red-700',
+  }};
+</script>
+
+<div class="flex h-full gap-6">
+  <div class="w-44 shrink-0">
+    <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Roles</h2>
+    {{#if rolesLoading}}
+      <p class="text-gray-400 text-sm">Loading…</p>
+    {{:else}}
+      <div class="space-y-1">
+        {{#each roles as role}}
+          <button
+            onclick={{() => selectRole(role)}}
+            class="w-full text-left px-3 py-2 rounded text-sm transition-colors
+                   {{activeRole === role ? 'bg-blue-600 text-white font-semibold' : 'text-gray-700 hover:bg-gray-100'}}">
+            {{role}}
+          </button>
+        {{/each}}
+      </div>
+    {{/if}}
+  </div>
+
+  <div class="flex-1 min-w-0">
+    <h1 class="text-2xl font-bold mb-6">
+      Authorizations
+      <span class="text-base font-normal text-gray-500">— {{activeRole}}</span>
+    </h1>
+
+    {{#if loading}}
+      <p class="text-gray-400 text-sm">Loading…</p>
+    {{:else if Object.keys(access).length === 0}}
+      <p class="text-gray-500 text-sm">No access granted for this role.</p>
+    {{:else}}
+      <div class="space-y-4">
+        {{#each Object.entries(access) as [resource, verbs]}}
+          <div class="bg-white rounded-lg shadow-sm overflow-hidden">
+            <div class="px-4 py-2 bg-gray-100 font-semibold text-gray-700 text-sm">{{resource}}</div>
+            <div class="divide-y">
+              {{#each Object.entries(verbs) as [verb, info]}}
+                <div class="px-4 py-3 flex gap-4 items-start text-sm">
+                  <span class="inline-block px-2 py-0.5 rounded font-mono text-xs font-bold w-16 text-center {{VERB_COLOR[verb] ?? 'bg-gray-100 text-gray-600'}}">
+                    {{verb}}
+                  </span>
+                  <div class="text-gray-700">
+                    {{#if verb === 'DELETE'}}
+                      <span class="text-green-600">allowed</span>
+                    {{:else if verb === 'GET'}}
+                      <span class="text-gray-400">out: </span>{{(info?.out ?? []).join(', ')}}
+                    {{:else}}
+                      <div><span class="text-gray-400">in:  </span>{{(info?.in  ?? []).join(', ')}}</div>
+                      <div><span class="text-gray-400">out: </span>{{(info?.out ?? []).join(', ')}}</div>
+                    {{/if}}
+                  </div>
+                </div>
+              {{/each}}
+            </div>
+          </div>
+        {{/each}}
+      </div>
+    {{/if}}
+  </div>
+</div>
 """
 
 
@@ -200,8 +320,10 @@ def _title(schema_name: str, table_name: str) -> str:
 
 
 def _layout(resources: list) -> str:
-    nav_links = '\n    '.join(
-        f'<a href="/{sn}/{tn}" class="hover:underline text-gray-700">{_title(sn, tn)}</a>'
+    nav_links = '\n      '.join(
+        f'<a href="/{sn}/{tn}"'
+        f' class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">'
+        f'{_title(sn, tn)}</a>'
         for sn, tn, *_ in resources
     )
     return f"""\
@@ -212,20 +334,25 @@ def _layout(resources: list) -> str:
   let {{ children }} = $props();
 </script>
 
-<div class="min-h-screen bg-gray-50">
-  <nav class="bg-white shadow-sm border-b px-6 py-3 flex gap-6 items-center">
-    <span class="font-bold text-gray-800">API Browser</span>
-    {nav_links}
-    <div class="ml-auto flex gap-3 items-center">
-      {{#if auth.token}}
-        <span class="text-xs text-gray-500">authenticated</span>
-        <button onclick={{auth.logout}} class="text-sm text-red-600 hover:underline">Logout</button>
-      {{:else}}
-        <a href="/login" class="text-sm text-blue-600 hover:underline">Login</a>
-      {{/if}}
+<div class="min-h-screen flex bg-gray-50">
+  <aside class="w-56 shrink-0 bg-white border-r flex flex-col">
+    <div class="px-4 py-4 border-b">
+      <span class="font-bold text-gray-800">API Browser</span>
     </div>
-  </nav>
-  <main class="p-6">
+    <nav class="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
+      {nav_links}
+    </nav>
+    <div class="px-2 py-3 border-t">
+      <a href="/access"
+         class="block px-3 py-2 rounded hover:bg-gray-100">
+        <div class="text-xs text-gray-400 mb-0.5">Role</div>
+        <div class="text-sm font-medium {{auth.token ? 'text-blue-700' : 'text-gray-400'}}">
+          {{auth.token ?? 'public'}}
+        </div>
+      </a>
+    </div>
+  </aside>
+  <main class="flex-1 overflow-y-auto p-6">
     {{@render children()}}
   </main>
 </div>
@@ -238,19 +365,60 @@ def _list_page(
     out_names: list, pk_info,
     has_post: bool, has_del: bool,
     map_key: str,
+    fk_deps: list,
 ) -> str:
     pk_field = pk_info[0] if pk_info else None
-    pk_ts   = pk_info[1] if pk_info else 'string'  # litestar path type, not ts — use string
-    title   = _title(schema_name, table_name)
+    title    = _title(schema_name, table_name)
+    fk_map   = {local: (rs, rt) for local, rs, rt, _ in fk_deps}
 
+    # Table header — one column per out field + optional actions column
     th_cols = '\n        '.join(
         f'<th class="px-4 py-2 text-left text-sm font-semibold text-gray-600">{f}</th>'
         for f in out_names
     )
-    td_cols = '\n          '.join(
-        f'<td class="px-4 py-2 text-sm">{{item.{f}}}</td>'
-        for f in out_names
+    action_th = (
+        '<th class="px-4 py-2 w-20"></th>'
+        if has_del and pk_field else ''
     )
+
+    # Table cells — FK fields are links to the related resource's detail page
+    def _td(f: str) -> str:
+        if f in fk_map:
+            rs, rt = fk_map[f]
+            return (
+                f'<td class="px-4 py-2 text-sm">'
+                f'<a href="/{rs}/{rt}/{{item.{f}}}" onclick={{(e) => e.stopPropagation()}}'
+                f' class="text-blue-500 hover:underline font-mono text-xs">{{item.{f}}}</a>'
+                f'</td>'
+            )
+        return f'<td class="px-4 py-2 text-sm">{{item.{f} ?? ""}}</td>'
+
+    td_cols = '\n          '.join(_td(f) for f in out_names)
+
+    # Row click navigates to the detail page
+    if pk_field:
+        tr_open = (
+            f'<tr class="border-t hover:bg-gray-50 cursor-pointer"'
+            f' onclick={{() => goto(`/{schema_name}/{table_name}/${{item.{pk_field}}}`)}}'
+            f'>'
+        )
+    else:
+        tr_open = '<tr class="border-t hover:bg-gray-50">'
+
+    # Delete button — stops row click propagation
+    action_td = ''
+    if has_del and pk_field:
+        action_td = (
+            f'<td class="px-4 py-2 text-right">\n'
+            f'          {{#if canDelete}}\n'
+            f'            <button'
+            f' onclick={{(e) => {{ e.stopPropagation(); handleDelete(item.{pk_field}); }}}}'
+            f'\n                    class="text-red-600 hover:underline text-sm">Delete</button>\n'
+            f'          {{/if}}\n'
+            f'        </td>'
+        )
+
+    # "New" button
     new_btn = (
         f'\n    {{#if canCreate}}\n'
         f'      <a href="/{schema_name}/{table_name}/new"\n'
@@ -258,19 +426,10 @@ def _list_page(
         f'        New\n      </a>\n    {{/if}}'
         if has_post else ''
     )
-    view_link = (
-        f'\n            <a href="/{schema_name}/{table_name}/{{item.{pk_field}}}"\n'
-        f'               class="text-blue-600 hover:underline text-sm">View</a>'
-        if pk_field else ''
-    )
-    del_btn = (
-        f'\n            {{#if canDelete}}\n'
-        f'              <button onclick={{() => handleDelete(item.{pk_field})}}\n'
-        f'                      class="text-red-600 hover:underline text-sm">Delete</button>\n'
-        f'            {{/if}}'
-        if has_del and pk_field else ''
-    )
-    delete_fn = (
+
+    can_create = f"\n  const canCreate = $derived(!!access['{map_key}']?.POST);" if has_post else ''
+    can_delete = f"\n  const canDelete  = $derived(!!access['{map_key}']?.DELETE);" if has_del else ''
+    delete_fn  = (
         f'\n  async function handleDelete(id: string) {{\n'
         f'    if (confirm(\'Delete this item?\')) {{\n'
         f'      await {rname}Api.remove(id);\n'
@@ -279,15 +438,14 @@ def _list_page(
         f'  }}'
         if has_del and pk_field else ''
     )
-    can_create = f"\n  const canCreate = $derived(!!access['{map_key}']?.POST);" if has_post else ''
-    can_delete = f"\n  const canDelete  = $derived(!!access['{map_key}']?.DELETE);" if has_del else ''
+    goto_import = "  import { goto } from '$app/navigation';\n" if pk_field else ''
 
     return f"""\
 <script lang="ts">
   import {{ {rname}State, {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ hoAccess }} from '$lib/stores/index.svelte.ts';
-
+{goto_import}
   let access = $state<Record<string, any>>({{}});
 
   $effect(() => {{
@@ -307,15 +465,14 @@ def _list_page(
       <thead class="bg-gray-100">
         <tr>
         {th_cols}
-          <th class="px-4 py-2"></th>
+          {action_th}
         </tr>
       </thead>
       <tbody>
         {{#each {rname}State.items as item}}
-          <tr class="border-t hover:bg-gray-50">
+          {tr_open}
           {td_cols}
-            <td class="px-4 py-2 flex gap-3">{view_link}{del_btn}
-            </td>
+            {action_td}
           </tr>
         {{/each}}
       </tbody>
@@ -334,8 +491,8 @@ def _new_page(
     fields_init = ', '.join(f'{f}: ""' for f in post_in_names)
     form_fields = '\n    '.join(
         f'<div>\n'
-        f'      <label class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
-        f'      <input bind:value={{form.{f}}}\n'
+        f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
+        f'      <input id="f_{f}" bind:value={{form.{f}}}\n'
         f'             class="w-full border rounded px-3 py-2 text-sm" />\n'
         f'    </div>'
         for f in post_in_names
@@ -385,92 +542,131 @@ def _detail_page(
     out_names: list, put_in_names: list,
     pk_field: str, all_fields: dict,
     has_put: bool,
+    fk_deps: list,
 ) -> str:
-    title = _title(schema_name, table_name)
-    read_only = [f for f in out_names if f != pk_field and f not in put_in_names]
+    title   = _title(schema_name, table_name)
+    fk_map    = {local: (rs, rt) for local, rs, rt, _ in fk_deps}
+    read_only = [f for f in out_names if f != pk_field]
 
-    ro_fields = '\n    '.join(
-        f'<div class="flex gap-2 text-sm">'
-        f'<span class="font-medium text-gray-600 w-32">{f}</span>'
-        f'<span>{{item.{f}}}</span></div>'
-        for f in read_only
-    )
+    # Read-only fields — FK fields rendered as links
+    def _ro_row(f: str) -> str:
+        label = f'<span class="font-medium text-gray-600 w-36 shrink-0">{f}</span>'
+        if f in fk_map:
+            rs, rt = fk_map[f]
+            value = (
+                f'<a href="/{rs}/{rt}/{{item.{f}}}"'
+                f' class="text-blue-500 hover:underline font-mono text-xs">{{item.{f}}}</a>'
+            )
+        else:
+            value = f'<span class="text-sm break-all">{{item.{f}}}</span>'
+        return f'<div class="flex gap-2 items-baseline">{label}{value}</div>'
 
-    fields_init = ', '.join(
-        f'{f}: item.{f} ?? ""'
-        for f in put_in_names
-    )
+    ro_fields = '\n    '.join(_ro_row(f) for f in read_only) if read_only else ''
+
+    # Edit form fields
     form_fields = '\n    '.join(
         f'<div>\n'
-        f'      <label class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
-        f'      <input bind:value={{form.{f}}}\n'
+        f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
+        f'      <input id="f_{f}" bind:value={{form.{f}}}\n'
         f'             class="w-full border rounded px-3 py-2 text-sm" />\n'
         f'    </div>'
         for f in put_in_names
     ) if put_in_names else ''
 
+    # Form state + edit toggle — populated reactively from item once loaded
+    extra_script = ''
+    edit_btn     = ''
     edit_section = ''
+
     if has_put and put_in_names:
-        edit_section = f"""\
+        empty_init  = ', '.join(f'{f}: ""' for f in put_in_names)
+        effect_body = '\n        '.join(f'form.{f} = (item.{f} as string) ?? "";' for f in put_in_names)
+        extra_script = (
+            f'\n  let editing = $state(false);\n'
+            f'  let form = $state({{ {empty_init} }});\n'
+            f'  let error = $state(\'\');\n'
+            f'  $effect(() => {{\n'
+            f'    if (item) {{\n'
+            f'        {effect_body}\n'
+            f'    }}\n'
+            f'  }});\n'
+            f'\n  async function handleUpdate(e: Event) {{\n'
+            f'    e.preventDefault();\n'
+            f'    try {{\n'
+            f'      const res = await {rname}Api.update(page.params.id, form);\n'
+            f'      if (!res.ok) throw new Error(await res.text());\n'
+            f'      editing = false;\n'
+            f'      {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ item = d; }});\n'
+            f'    }} catch (err: any) {{\n'
+            f'      error = err.message;\n'
+            f'    }}\n'
+            f'  }}'
+        )
+        edit_btn = (
+            '\n    <button onclick={() => { editing = !editing; error = \'\'; }}'
+            '\n            class="text-sm px-3 py-1 border rounded hover:bg-gray-50">'
+            '\n      {editing ? \'Cancel\' : \'Edit\'}</button>'
+        )
+        edit_section = f"""
 
-  <h2 class="text-lg font-semibold mt-6 mb-4">Edit</h2>
-  {{#if error}}<p class="text-red-600 mb-4">{{error}}</p>{{/if}}
-  <form onsubmit={{handleUpdate}} class="space-y-4">
-    {form_fields}
-    <div class="flex gap-3 pt-2">
-      <button type="submit"
-              class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
-        Update
-      </button>
-      <a href="/{schema_name}/{table_name}"
-         class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</a>
-    </div>
-  </form>"""
+  {{#if editing}}
+  <div class="mt-6 pt-6 border-t">
+    {{#if error}}<p class="text-red-600 mb-4">{{error}}</p>{{/if}}
+    <form onsubmit={{handleUpdate}} class="space-y-4">
+      {form_fields}
+      <div class="flex gap-3 pt-2">
+        <button type="submit"
+                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
+          Update
+        </button>
+        <button type="button" onclick={{() => {{ editing = false; }}}}
+                class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</button>
+      </div>
+    </form>
+  </div>
+  {{/if}}"""
 
-    update_fn = ''
-    if has_put:
-        update_fn = f"""\
-
-  let form = $state({{ {fields_init} }});
-  let error = $state('');
-
-  async function handleUpdate(e: Event) {{
-    e.preventDefault();
-    try {{
-      const res = await {rname}Api.update(data.id, form);
-      if (!res.ok) throw new Error(await res.text());
-      goto('/{schema_name}/{table_name}');
-    }} catch (err: any) {{
-      error = err.message;
-    }}
-  }}"""
+    map_key       = f'{schema_name}/{table_name}'
+    put_in_import = f', {iname}PutIn' if has_put else ''
+    can_edit      = f"\n  const canEdit = $derived(!!access['{map_key}']?.PUT);" if has_put else ''
+    edit_btn_wrap = (
+        f'\n      {{#if canEdit}}{edit_btn}\n      {{/if}}'
+        if has_put and put_in_names else ''
+    )
 
     return f"""\
 <script lang="ts">
   import {{ {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
-  import type {{ {iname}Out{', ' + iname + 'PutIn' if has_put else ''} }} from '$lib/stores/{stem}.svelte.ts';
+  import type {{ {iname}Out{put_in_import} }} from '$lib/stores/{stem}.svelte.ts';
   import {{ goto }} from '$app/navigation';
   import {{ page }} from '$app/state';
+  import {{ auth }} from '$lib/auth.svelte.ts';
+  import {{ hoAccess }} from '$lib/stores/index.svelte.ts';
 
-  let item = $state<{iname}Out | null>(null);
+  let item   = $state<{iname}Out | null>(null);
+  let access = $state<Record<string, any>>({{}});
 
   $effect(() => {{
+    hoAccess(auth.token ?? undefined).then(a => {{ access = a; }});
     {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ item = d; }});
   }});
-{update_fn}
+{can_edit}{extra_script}
 </script>
 
 {{#if item}}
-<div class="max-w-lg mx-auto p-6 bg-white rounded-lg shadow mt-6">
+<div class="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow mt-6">
   <div class="flex justify-between items-start mb-6">
     <h1 class="text-2xl font-bold">{title}</h1>
-    <a href="/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
+    <div class="flex gap-3 items-center">
+{edit_btn_wrap}
+      <a href="/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
+    </div>
   </div>
 
   <div class="space-y-2 mb-4">
-    <div class="flex gap-2 text-sm">
-      <span class="font-medium text-gray-600 w-32">{pk_field}</span>
-      <span class="font-mono text-xs">{{item.{pk_field}}}</span>
+    <div class="flex gap-2 items-baseline">
+      <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
+      <span class="font-mono text-xs text-gray-500 break-all">{{item.{pk_field}}}</span>
     </div>
     {ro_fields}
   </div>{edit_section}
@@ -484,6 +680,29 @@ def _detail_page(
 # ---------------------------------------------------------------------------
 
 class SvelteAppGenerator(StoreGenerator):
+
+    def _fk_deps(self, inst, out_names: list, crud_resources: set) -> list:
+        """Return (local_field, remote_schema, remote_table, remote_pk) for each
+        simple non-reverse FK whose local field is in out_names and whose remote
+        table has CRUD_ACCESS."""
+        deps = []
+        for fk in getattr(inst, '_ho_fkeys', {}).values():
+            if fk.is_reverse:
+                continue
+            local_fields = fk.names
+            remote_pks   = fk.fk_names
+            if len(local_fields) != 1 or len(remote_pks) != 1:
+                continue
+            local_field = local_fields[0]
+            if local_field not in out_names:
+                continue
+            fqtn = fk.remote['fqtn']
+            remote_schema = fqtn[0].replace('.', '_')
+            remote_table  = fqtn[1]
+            if (remote_schema, remote_table) not in crud_resources:
+                continue
+            deps.append((local_field, remote_schema, remote_table, remote_pks[0]))
+        return deps
 
     def generate(self, classes, api_version, output_dir: Path) -> None:
         if output_dir.exists():
@@ -512,8 +731,9 @@ class SvelteAppGenerator(StoreGenerator):
         # --- auth store ---
         self._write(output_dir / 'src' / 'lib' / 'auth.svelte.ts', _AUTH_STORE)
 
-        # --- collect resources ---
-        resources = []
+        # Pass 1: identify all resources that expose CRUD_ACCESS
+        crud_resources: set[tuple[str, str]] = set()
+        raw = []
         for relation, _relation_type in classes:
             module_str = relation.__module__
             try:
@@ -522,6 +742,14 @@ class SvelteAppGenerator(StoreGenerator):
                 continue
             if not getattr(mod, 'CRUD_ACCESS', None):
                 continue
+            schema_name = relation._schemaname.replace('.', '_')
+            table_name  = relation.__name__.lower()
+            crud_resources.add((schema_name, table_name))
+            raw.append((relation, mod))
+
+        # Pass 2: build per-resource metadata (needs complete crud_resources for fk_deps)
+        resources = []
+        for relation, mod in raw:
             crud_access  = mod.CRUD_ACCESS
             api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', [])
             schema_name  = relation._schemaname.replace('.', '_')
@@ -551,29 +779,31 @@ class SvelteAppGenerator(StoreGenerator):
                 crud_access, 'PUT', pk_field, api_excluded, all_names
             ) if has_put else []
 
+            fk_deps = self._fk_deps(inst, out_names, crud_resources)
+
             resources.append((
                 schema_name, table_name, stem, rname, iname,
                 out_names, pk_info, pk_field, all_fields,
                 has_post, has_put, has_del,
-                post_in_names, put_in_names, map_key, crud_access,
+                post_in_names, put_in_names, map_key, crud_access, fk_deps,
             ))
 
         # --- layout + home ---
         routes_dir = output_dir / 'src' / 'routes'
-        self._write(routes_dir / '+layout.svelte',
-                    _layout(resources))
+        self._write(routes_dir / '+layout.svelte', _layout(resources))
         first_route = (
             f'/{resources[0][0]}/{resources[0][1]}' if resources else '/'
         )
         self._write(routes_dir / '+page.svelte',
                     _HOME_PAGE.format(first_route=first_route))
-        self._write(routes_dir / 'login' / '+page.svelte', _LOGIN_PAGE)
+        self._write(routes_dir / 'login'  / '+page.svelte', _login_page(version_prefix))
+        self._write(routes_dir / 'access' / '+page.svelte', _access_page(version_prefix))
 
         # --- per-resource routes ---
         for (schema_name, table_name, stem, rname, iname,
              out_names, pk_info, pk_field, all_fields,
              has_post, has_put, has_del,
-             post_in_names, put_in_names, map_key, crud_access) in resources:
+             post_in_names, put_in_names, map_key, crud_access, fk_deps) in resources:
 
             res_dir = routes_dir / schema_name / table_name
 
@@ -581,7 +811,7 @@ class SvelteAppGenerator(StoreGenerator):
             self._write(
                 res_dir / '+page.svelte',
                 _list_page(schema_name, table_name, stem, rname, iname,
-                           out_names, pk_info, has_post, has_del, map_key),
+                           out_names, pk_info, has_post, has_del, map_key, fk_deps),
             )
 
             # new (POST)
@@ -598,7 +828,7 @@ class SvelteAppGenerator(StoreGenerator):
                     res_dir / '[id]' / '+page.svelte',
                     _detail_page(schema_name, table_name, stem, rname, iname,
                                  out_names, put_in_names, pk_field, all_fields,
-                                 has_put),
+                                 has_put, fk_deps),
                 )
 
         print(f'\nSvelteKit app generated in {output_dir}')

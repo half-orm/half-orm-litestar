@@ -43,7 +43,11 @@ def add_commands(main_group):
         '--bump', is_flag=True, default=False,
         help='Bump the API version to N+1 (asks for confirmation).',
     )
-    def generate(dry_run, bump):
+    @click.option(
+        '--fastapi', is_flag=True, default=False,
+        help='Generate a FastAPI app (uses templates_fastapi.py, no @api_* support).',
+    )
+    def generate(dry_run, bump, fastapi):
         """Generate api/app.py from @api_* decorated halfORM methods.
 
         The API version is read from api/.api_version (default: 0).
@@ -53,6 +57,8 @@ def add_commands(main_group):
         Must be run from inside a half-orm-dev project directory.
         On first run, missing scaffolding files (guards.py, custom/) are
         created automatically and are never overwritten on subsequent runs.
+
+        Use --fastapi to generate a FastAPI app instead of Litestar.
         """
         try:
             from half_orm_dev.repo import Repo
@@ -75,6 +81,7 @@ def add_commands(main_group):
             sys.exit(1)
 
         api_version = _read_api_version()
+        framework = 'fastapi' if fastapi else 'litestar'
 
         if bump:
             next_version = api_version + 1
@@ -87,14 +94,14 @@ def add_commands(main_group):
 
         if dry_run:
             click.echo(
-                f'[dry-run] would generate api/app.py for project: {repo.name}'
+                f'[dry-run] would generate api/app.py ({framework}) for project: {repo.name}'
                 f' (v{api_version})'
             )
             return
 
         from half_orm_litestar.generate import GenApi
-        click.echo(f'Generating Litestar API for project: {repo.name} (v{api_version})')
-        GenApi(repo, api_version=api_version)
+        click.echo(f'Generating {framework} API for project: {repo.name} (v{api_version})')
+        GenApi(repo, api_version=api_version, framework=framework)
 
     @litestar.command('gen-frontend')
     @click.option('--svelte', 'framework', flag_value='svelte', default=True,

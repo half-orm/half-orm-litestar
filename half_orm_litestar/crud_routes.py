@@ -243,15 +243,20 @@ def generate_crud_routes(
     classes: Iterable[Tuple[Type[Relation], str]],
     api_version,
     covered: set,
+    templates=None,
 ) -> Tuple[list, list]:
     """Generate auto-CRUD blocks for all relations that define CRUD_ACCESS.
 
     Skips verbs already covered by @api_* (present in *covered* set).
     Returns (blocks, route_handler_names).
     """
+    if templates is None:
+        templates = T
+
     blocks: list[str] = []
     route_handlers: list[str] = []
     access_map: dict = {}
+    roles: set[str] = set()
 
     version_prefix = f'/v{api_version}' if api_version is not None else ''
 
@@ -273,6 +278,10 @@ def generate_crud_routes(
 
         _validate_crud_access(crud_access, module_str)
 
+        for verb_roles in crud_access.values():
+            if isinstance(verb_roles, dict):
+                roles.update(verb_roles.keys())
+
         api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', [])
         kind         = getattr(relation, '_ho_kind', 'Table')
         is_table     = kind == 'Table'
@@ -286,18 +295,18 @@ def generate_crud_routes(
         all_fields   = getattr(instance, '_ho_fields', {})
         all_names    = list(all_fields.keys())
 
-        blocks.append(T.CRUD_MODULE_IMPORT.format(
+        blocks.append(templates.CRUD_MODULE_IMPORT.format(
             schema=schema,
             module_name=module_name,
             module_alias=module_alias,
         ))
 
-        # Out TypedDict (driven by GET, used for all return types)
+        # Out TypedDict / Pydantic model (driven by GET, used for all return types)
         out_class  = f'_Out_{module_alias}'
         out_names  = _gen_out_fields(crud_access, 'GET', api_excluded, all_names)
         if not out_names:
             out_names = [f for f in all_names if f not in api_excluded]
-        blocks.append('\n' + _typedict_block(out_class, out_names, all_fields) + '\n')
+        blocks.append('\n' + templates.typedict_block(out_class, out_names, all_fields) + '\n')
 
         filter_params, filter_dict = _filter_params_str(all_fields)
         get_desc = _access_description(crud_access, 'GET')
@@ -305,7 +314,7 @@ def generate_crud_routes(
         # GET list
         if (module_str, 'GET') not in covered and 'GET' in crud_access:
             handler_name = f'{handler_prefix}_list'
-            blocks.append(T.CRUD_GET_LIST.format(
+            blocks.append(templates.CRUD_GET_LIST.format(
                 path=base_path,
                 handler_name=handler_name,
                 filter_params=filter_params,
@@ -321,7 +330,7 @@ def generate_crud_routes(
         if pk_info and (module_str, 'GET') not in covered and 'GET' in crud_access:
             pk_field, pk_path_type, pk_py_type = pk_info
             handler_name = f'{handler_prefix}_get'
-            blocks.append(T.CRUD_GET_ONE.format(
+            blocks.append(templates.CRUD_GET_ONE.format(
                 path=base_path,
                 handler_name=handler_prefix,
                 pk_field=pk_field,
@@ -341,9 +350,9 @@ def generate_crud_routes(
             if (module_str, 'POST') not in covered and 'POST' in crud_access:
                 post_in_class = f'_In_{module_alias}_post'
                 post_in_names = _gen_in_fields(crud_access, 'POST', pk_field, api_excluded, all_names)
-                blocks.append('\n' + _typedict_block(post_in_class, post_in_names, all_fields) + '\n')
+                blocks.append('\n' + templates.typedict_block(post_in_class, post_in_names, all_fields) + '\n')
                 handler_name = f'{handler_prefix}_create'
-                blocks.append(T.CRUD_POST.format(
+                blocks.append(templates.CRUD_POST.format(
                     path=base_path,
                     handler_name=handler_prefix,
                     module_alias=module_alias,
@@ -357,9 +366,9 @@ def generate_crud_routes(
             if (module_str, 'PUT') not in covered and 'PUT' in crud_access:
                 put_in_class = f'_In_{module_alias}_put'
                 put_in_names = _gen_in_fields(crud_access, 'PUT', pk_field, api_excluded, all_names)
-                blocks.append('\n' + _typedict_block(put_in_class, put_in_names, all_fields) + '\n')
+                blocks.append('\n' + templates.typedict_block(put_in_class, put_in_names, all_fields) + '\n')
                 handler_name = f'{handler_prefix}_update'
-                blocks.append(T.CRUD_PUT.format(
+                blocks.append(templates.CRUD_PUT.format(
                     path=base_path,
                     handler_name=handler_prefix,
                     pk_field=pk_field,
@@ -375,7 +384,7 @@ def generate_crud_routes(
 
             if (module_str, 'DELETE') not in covered and 'DELETE' in crud_access:
                 handler_name = f'{handler_prefix}_delete'
-                blocks.append(T.CRUD_DELETE.format(
+                blocks.append(templates.CRUD_DELETE.format(
                     path=base_path,
                     handler_name=handler_prefix,
                     pk_field=pk_field,
@@ -393,15 +402,24 @@ def generate_crud_routes(
         if entry:
             access_map[map_key] = entry
 
+    # /ho_roles endpoint — static list of all roles present in CRUD_ACCESS
+    if roles:
+        blocks.append(
+            templates.HO_ROLES_ROUTE.format(
+                roles_json=json.dumps(sorted(roles)),
+                version_prefix=version_prefix,
+            )
+        )
+        route_handlers.append('_crud_roles_list')
+
     # /ho_access endpoint — filtered by the caller's authorized_roles
     if access_map:
         json_str = json.dumps(access_map, indent=4)
         blocks.append(
-            f'\n_ACCESS_MAP = {json_str}\n\n'
-            f'@get("{version_prefix}/ho_access", guards=[guards.public])\n'
-            f'async def _crud_access_map(request: Request) -> dict:\n'
-            f'    authorized_roles = getattr(request.state, "authorized_roles", ["public"])\n'
-            f'    return _filter_access_for_roles(_ACCESS_MAP, authorized_roles)\n'
+            templates.HO_ACCESS_ROUTE.format(
+                json_str=json_str,
+                version_prefix=version_prefix,
+            )
         )
         route_handlers.append('_crud_access_map')
 

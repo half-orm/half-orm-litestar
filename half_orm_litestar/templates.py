@@ -56,9 +56,36 @@ logging_config = LoggingConfig(
 
 """
 
-FOOTER = """
+FOOTER = '''
+_HO_WARN = """
+======================================================================
+  halfORM DEV HELPERS ACTIVE — NOT FOR PRODUCTION
+======================================================================
+  /ho_roles  : exposes all declared roles (no authentication)
+  /ho_access : exposes the full access map filtered by role
+  _get_roles : bearer token used directly as a role name
+               (no signature verification)
+
+  Replace the Authorization middleware with a real JWT implementation
+  before deploying to production.
+======================================================================
+"""
+
+_HO_WARN_SHOWN = False
+
 async def _ho_startup() -> None:
+    global _HO_WARN_SHOWN
+    import sys
     await MODEL.aconnect()
+    if MODEL._production_mode:
+        raise RuntimeError(
+            "halfORM DEV HELPERS are active (ho_roles, ho_access, _get_roles fallback). "
+            "These routes and the bearer-token-as-role fallback are not safe for production. "
+            "Secure or remove them before deploying."
+        )
+    if not _HO_WARN_SHOWN:
+        print(_HO_WARN, file=sys.stderr, flush=True)
+        _HO_WARN_SHOWN = True
 
 application = Litestar(
     route_handlers=[{route_handlers}] + routes,
@@ -66,7 +93,7 @@ application = Litestar(
     logging_config=logging_config,
     on_startup=[_ho_startup],{openapi_config}
 )
-"""
+'''
 
 OPENAPI_CONFIG = """
     openapi_config=OpenAPIConfig(title="{title}", version="{version}"),"""
@@ -124,6 +151,15 @@ HTTP = {
 # ---------------------------------------------------------------------------
 
 CRUD_HELPERS = """
+def _get_roles(request):
+    '''Return authorized roles: from middleware state, or bearer token as role (dev fallback).'''
+    roles = getattr(request.state, 'authorized_roles', None)
+    if roles is not None:
+        return roles
+    token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+    return [token] if token else ['public']
+
+
 def _effective_out_fields(crud_access, verb, authorized_roles, api_excluded=None):
     api_excluded = api_excluded or []
     role_map = crud_access.get(verb, {})
@@ -201,6 +237,33 @@ class {class_name}(TypedDict, total=False):
 
 CRUD_MODULE_IMPORT = "\nfrom {schema} import {module_name} as {module_alias}\n"
 
+HO_ACCESS_ROUTE = (
+    '\n_ACCESS_MAP = {json_str}\n\n'
+    '@get("{version_prefix}/ho_access", guards=[guards.public])\n'
+    'async def _crud_access_map(request: Request) -> dict:\n'
+    '    authorized_roles = _get_roles(request)\n'
+    '    return _filter_access_for_roles(_ACCESS_MAP, authorized_roles)\n'
+)
+
+HO_ROLES_ROUTE = (
+    '\n_ROLES = {roles_json}\n\n'
+    '@get("{version_prefix}/ho_roles", guards=[guards.public])\n'
+    'async def _crud_roles_list(request: Request) -> list:\n'
+    '    return _ROLES\n'
+)
+
+
+def typedict_block(class_name: str, field_names: list, all_fields: dict) -> str:
+    from half_orm_litestar.crud_routes import _py_type_str
+    lines = [f'class {class_name}(TypedDict, total=False):']
+    valid = [(f, all_fields[f]) for f in field_names if f in all_fields]
+    if not valid:
+        lines.append('    pass')
+    else:
+        for fname, fobj in valid:
+            lines.append(f'    {fname}: Optional[{_py_type_str(fobj.py_type)}]')
+    return '\n'.join(lines)
+
 CRUD_GET_LIST = """
 @get("{path}", description="{access_description}")
 async def {handler_name}(
@@ -211,7 +274,7 @@ async def {handler_name}(
 ) -> list[{out_typedict}]:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     filter_kwargs = {{{filter_dict}}}
-    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", getattr(request.state, "authorized_roles", []), api_excluded)
+    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", _get_roles(request), api_excluded)
     if fields:
         projection = [f for f in fields if not authorized or f in authorized]
     else:
@@ -228,7 +291,7 @@ async def {handler_name}_get(
     id: {pk_py_type},
 ) -> {out_typedict}:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
-    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", getattr(request.state, "authorized_roles", []), api_excluded)
+    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", _get_roles(request), api_excluded)
     rows = await {module_alias}.{class_name}({pk_field}=id).ho_aselect(*authorized)
     if not rows:
         raise HTTPException(status_code=404)
@@ -242,7 +305,7 @@ async def {handler_name}_create(
     data: {in_typedict},
 ) -> {out_typedict}:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
-    in_fields = _effective_in_fields({module_alias}.CRUD_ACCESS, "POST", getattr(request.state, "authorized_roles", []), api_excluded)
+    in_fields = _effective_in_fields({module_alias}.CRUD_ACCESS, "POST", _get_roles(request), api_excluded)
     payload = {{k: v for k, v in dict(data).items() if v is not None and (not in_fields or k in in_fields)}}
     return await {module_alias}.{class_name}(**payload).ho_ainsert()
 """
@@ -255,7 +318,7 @@ async def {handler_name}_update(
     data: {in_typedict},
 ) -> {out_typedict}:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
-    in_fields = _effective_in_fields({module_alias}.CRUD_ACCESS, "PUT", getattr(request.state, "authorized_roles", []), api_excluded)
+    in_fields = _effective_in_fields({module_alias}.CRUD_ACCESS, "PUT", _get_roles(request), api_excluded)
     payload = {{k: v for k, v in dict(data).items() if v is not None and (not in_fields or k in in_fields)}}
     result = await {module_alias}.{class_name}({pk_field}=id).ho_aupdate(**payload)
     if not result:

@@ -47,6 +47,7 @@ class GenApi:
         module_name: str | None = None,
         base_dir: str | None = None,
         api_version: int | None = None,
+        framework: str = 'litestar',
     ):
         if repo is not None:
             self._module_name = repo.name
@@ -62,27 +63,30 @@ class GenApi:
             self._classes = list(relation_classes)
 
         self._api_version = api_version
+        self._framework = framework
         self._api_dir = self._base_dir / 'api'
         self._generate()
 
     def _generate(self) -> None:
         os.environ.setdefault('API_GEN_MODE', '1')
 
-        # --- @api_* routes ---
-        api_blocks, api_handlers, covered = generate_api_routes(
-            self._classes, self._api_version
-        )
+        if self._framework == 'fastapi':
+            from half_orm_litestar import templates_fastapi as templates
+            api_blocks, api_handlers, covered = [], [], set()
+        else:
+            templates = T
+            api_blocks, api_handlers, covered = generate_api_routes(
+                self._classes, self._api_version
+            )
 
         # --- auto-CRUD routes ---
         crud_blocks, crud_handlers = generate_crud_routes(
-            self._classes, self._api_version, covered
+            self._classes, self._api_version, covered, templates=templates
         )
 
         # --- assemble app.py ---
-        route_handlers_str = ', '.join(api_handlers + crud_handlers)
-
         openapi_config = (
-            T.OPENAPI_CONFIG.format(
+            templates.OPENAPI_CONFIG.format(
                 title=self._module_name,
                 version=f'v{self._api_version}',
             )
@@ -91,19 +95,23 @@ class GenApi:
         )
 
         output = (
-            T.HEADER.format(module=self._module_name)
-            + (T.CRUD_HELPERS if crud_blocks else '')
+            templates.HEADER.format(module=self._module_name)
+            + (templates.CRUD_HELPERS if crud_blocks else '')
             + ''.join(api_blocks)
             + ''.join(crud_blocks)
-            + T.FOOTER.format(
+        )
+
+        if self._framework == 'fastapi':
+            output += templates.FOOTER.format(openapi_config=openapi_config)
+        else:
+            route_handlers_str = ', '.join(api_handlers + crud_handlers)
+            output += templates.FOOTER.format(
                 route_handlers=route_handlers_str,
                 openapi_config=openapi_config,
             )
-        )
-
-        # --- scaffold missing api/ files ---
-        print(f'\nScaffolding {self._api_dir} ...')
-        scaffold_api_dir(self._api_dir)
+            # --- scaffold missing api/ files ---
+            print(f'\nScaffolding {self._api_dir} ...')
+            scaffold_api_dir(self._api_dir)
 
         # --- write app.py ---
         app_py = self._api_dir / 'app.py'

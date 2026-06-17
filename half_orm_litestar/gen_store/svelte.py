@@ -81,6 +81,10 @@ class SvelteGenerator(StoreGenerator):
 
             lines = []
 
+            # Auth import (provides bearer token for all API calls)
+            lines.append("import { auth } from '$lib/auth.svelte.ts';")
+            lines.append('')
+
             # FK imports
             for local_field, remote_schema, remote_table, remote_pk in fk_deps:
                 remote_rname = self.resource_name(remote_schema, remote_table)
@@ -130,35 +134,42 @@ class SvelteGenerator(StoreGenerator):
 
             # API
             lines.append(f"const _BASE = '{base_path}';")
+            lines.append("const _hdrs = (extra?: Record<string, string>) => ({")
+            lines.append("    ...(auth.token ? { Authorization: `Bearer ${auth.token}` } : {}),")
+            lines.append("    ...extra,")
+            lines.append("});")
             lines.append('')
             api_entries = []
             if 'GET' in crud_access:
                 api_entries.append(
                     f"    list:   (params: Partial<{iname}Out> = {{}}) =>\n"
-                    f"                fetch(_BASE + '?' + new URLSearchParams(params as any)),"
+                    f"                fetch(_BASE + '?' + new URLSearchParams(params as any),\n"
+                    f"                      {{ headers: _hdrs() }}),"
                 )
                 if pk_info:
                     api_entries.append(
-                        f"    get:    (id: {pk_ts_type}) => fetch(`${{_BASE}}/${{id}}`),"
+                        f"    get:    (id: {pk_ts_type}) =>\n"
+                        f"                fetch(`${{_BASE}}/${{id}}`, {{ headers: _hdrs() }}),"
                     )
             if has_post:
                 api_entries.append(
                     f"    create: (data: {iname}PostIn) =>\n"
                     f"                fetch(_BASE, {{ method: 'POST',\n"
-                    f"                               headers: {{'Content-Type': 'application/json'}},\n"
+                    f"                               headers: _hdrs({{'Content-Type': 'application/json'}}),\n"
                     f"                               body: JSON.stringify(data) }}),"
                 )
             if has_put:
                 api_entries.append(
                     f"    update: (id: {pk_ts_type}, data: {iname}PutIn) =>\n"
                     f"                fetch(`${{_BASE}}/${{id}}`, {{ method: 'PUT',\n"
-                    f"                                              headers: {{'Content-Type': 'application/json'}},\n"
+                    f"                                              headers: _hdrs({{'Content-Type': 'application/json'}}),\n"
                     f"                                              body: JSON.stringify(data) }}),"
                 )
             if has_del:
                 api_entries.append(
                     f"    remove: (id: {pk_ts_type}) =>\n"
-                    f"                fetch(`${{_BASE}}/${{id}}`, {{ method: 'DELETE' }}),"
+                    f"                fetch(`${{_BASE}}/${{id}}`,\n"
+                    f"                      {{ method: 'DELETE', headers: _hdrs() }}),"
                 )
             lines.append(f'export const {rname}Api = {{')
             lines.extend(api_entries)
