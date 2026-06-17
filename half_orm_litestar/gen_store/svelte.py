@@ -169,7 +169,6 @@ class SvelteGenerator(StoreGenerator):
             lines.append("const _fetch = (url: string, opts?: RequestInit) => {")
             lines.append("    const method = opts?.method ?? 'GET';")
             lines.append("    if (method === 'GET') auth.fetchedRoutes.add(url);")
-            lines.append("    console.log('[fetch]', method, url);")
             lines.append("    return fetch(url, opts);")
             lines.append("};")
             lines.append('')
