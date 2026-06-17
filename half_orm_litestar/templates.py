@@ -160,6 +160,17 @@ def _get_roles(request):
     return [token] if token else ['public']
 
 
+def _get_role_filter(crud_access, verb, authorized_roles):
+    '''Return mandatory filter kwargs for authorized roles (row-level security).'''
+    role_map = crud_access.get(verb, {})
+    combined = {}
+    for role in authorized_roles:
+        rv = role_map.get(role)
+        if isinstance(rv, dict) and 'filter' in rv:
+            combined.update(rv['filter'])
+    return combined
+
+
 def _effective_out_fields(crud_access, verb, authorized_roles, api_excluded=None):
     api_excluded = api_excluded or []
     role_map = crud_access.get(verb, {})
@@ -273,13 +284,15 @@ async def {handler_name}(
     offset: Optional[int] = None,
 ) -> list[{out_typedict}]:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
+    roles = _get_roles(request)
     filter_kwargs = {{{filter_dict}}}
-    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", _get_roles(request), api_excluded)
+    role_filter = _get_role_filter({module_alias}.CRUD_ACCESS, "GET", roles)
+    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", roles, api_excluded)
     if fields:
         projection = [f for f in fields if not authorized or f in authorized]
     else:
         projection = authorized
-    return await {module_alias}.{class_name}(**filter_kwargs).ho_aselect(
+    return await {module_alias}.{class_name}(**{{**filter_kwargs, **role_filter}}).ho_aselect(
         *projection, limit=limit, offset=offset
     )
 """
@@ -291,8 +304,10 @@ async def {handler_name}_get(
     id: {pk_py_type},
 ) -> {out_typedict}:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
-    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", _get_roles(request), api_excluded)
-    rows = await {module_alias}.{class_name}({pk_field}=id).ho_aselect(*authorized)
+    roles = _get_roles(request)
+    role_filter = _get_role_filter({module_alias}.CRUD_ACCESS, "GET", roles)
+    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", roles, api_excluded)
+    rows = await {module_alias}.{class_name}({pk_field}=id, **role_filter).ho_aselect(*authorized)
     if not rows:
         raise HTTPException(status_code=404)
     return rows[0]

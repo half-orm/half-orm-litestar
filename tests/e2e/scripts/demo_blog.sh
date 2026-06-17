@@ -151,7 +151,10 @@ insert_crud_access "${PROJECT}/blog/author.py" \
 
 insert_crud_access "${PROJECT}/blog/post.py" \
 'CRUD_ACCESS = {
-    "GET":    {"public": ["id", "title", "published", "author_id"], "connected": None},
+    "GET":    {
+        "public":    {"out": ["id", "title", "published", "author_id"], "filter": {"published": True}},
+        "connected": None,
+    },
     "POST":   {"connected": {"in": ["title", "content", "author_id"]}},
     "PUT":    {"connected": {"in": ["title", "content", "published"]}},
     "DELETE": {"admin": None},
