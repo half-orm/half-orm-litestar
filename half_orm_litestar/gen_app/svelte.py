@@ -132,24 +132,31 @@ _APP_CSS = """\
 
 def _auth_store(version_prefix: str) -> str:
     return f"""\
+import {{ clearAllStates }} from '$lib/stateRegistry';
+
 export type WsEvent = {{ event: 'create' | 'update' | 'delete'; resource: string; id: unknown }};
 
 class AuthState {{
-    token     = $state<string | null>(
+    token         = $state<string | null>(
         typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('ho_token') : null
     );
-    access    = $state<Record<string, any>>({{}});
-    lastEvent = $state<WsEvent | null>(null);
+    access        = $state<Record<string, any>>({{}});
+    lastEvent     = $state<WsEvent | null>(null);
+    fetchedRoutes = new Set<string>();
 
     login(t: string) {{
         sessionStorage.setItem('ho_token', t);
         this.token = t;
+        this.fetchedRoutes = new Set();
+        clearAllStates();
         this._fetchAccess();
     }}
 
     logout() {{
         sessionStorage.removeItem('ho_token');
         this.token = null;
+        this.fetchedRoutes = new Set();
+        clearAllStates();
         this._fetchAccess();
     }}
 
@@ -474,17 +481,17 @@ def _list_component(
   const hasFilters = $derived(Object.keys(filters).length > 0);
 
   const displayItems = $derived(
-    {rname}State.loaded && hasFilters
+    hasFilters && auth.fetchedRoutes.has({rname}Api.listUrl({{}}))
       ? Array.from({rname}State.byId.values()).filter(item =>
             Object.entries(filters).every(([k, v]) => String((item as any)[k]) === String(v)))
       : {rname}State.items
   );
 
   $effect(() => {{
-    if (!{rname}State.loaded) {{
-      const f = filters;
+    const url = {rname}Api.listUrl(filters);
+    if (!auth.fetchedRoutes.has(url)) {{
       const filtered = hasFilters;
-      {rname}Api.list(f).then(r => r.json()).then(d => {{
+      {rname}Api.list(filters).then(r => r.json()).then(d => {{
         if (filtered) {rname}State.mergeItems(d);
         else {rname}State.setItems(d);
       }});
@@ -707,8 +714,7 @@ def _detail_page(
 
     def _fk_ref_states(deps: list) -> str:
         lines = [
-            f"  const {_rname(rs, rt)}Ref = $derived("
-            f"item?.{lf} ? ({_rname(rs, rt)}State.byId.get(String(item.{lf})) ?? null) : null);"
+            f"  let {_rname(rs, rt)}Ref = $state<{_cname(rs, rt)}Out | null>(null);"
             for lf, rs, rt, _ in deps
         ]
         return ('\n' + '\n'.join(lines)) if lines else ''
@@ -716,11 +722,17 @@ def _detail_page(
     def _fk_ref_effects(deps: list) -> str:
         blocks = []
         for lf, rs, rt, _ in deps:
-            rn = _rname(rs, rt)
+            rn  = _rname(rs, rt)
             blocks.append(
                 f'  $effect(() => {{\n'
-                f'    if (item?.{lf} && !{rn}State.byId.has(String(item.{lf})))\n'
-                f'      {rn}Api.get(item.{lf}).then(r => r.json()).then(d => {{ {rn}State.setItem(d); }});\n'
+                f'    if (!item?.{lf}) return;\n'
+                f'    const _url = {rn}Api.getUrl(item.{lf});\n'
+                f'    if (auth.fetchedRoutes.has(_url)) {{\n'
+                f'      {rn}Ref = {rn}State.byId.get(String(item.{lf})) ?? null;\n'
+                f'    }} else {{\n'
+                f'      {rn}Api.get(item.{lf}).then(r => r.ok ? r.json() : null)\n'
+                f'                .then(d => {{ if (d) {{ {rn}State.setItem(d); {rn}Ref = d; }} }});\n'
+                f'    }}\n'
                 f'  }});'
             )
         return ('\n' + '\n'.join(blocks)) if blocks else ''
@@ -781,18 +793,23 @@ def _detail_page(
   import {{ page }} from '$app/state';
   import {{ auth }} from '$lib/auth.svelte.ts';{fk_imports}{rev_imports}
 
-  let item = $state<{iname}Out | null>({rname}State.byId.get(page.params.id) ?? null);
+  let item      = $state<{iname}Out | null>({rname}State.byId.get(page.params.id) ?? null);
+  let _lastToken = auth.token;
 {fk_states}
   $effect(() => {{
+    const t = auth.token;
+    if (t !== _lastToken) {{ _lastToken = t; item = null; }}
     if (!item)
-      {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ item = d; {rname}State.setItem(d); }});
+      {rname}Api.get(page.params.id).then(r => r.ok ? r.json() : null)
+                .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }});
   }});
 
   $effect(() => {{
     const ev = auth.lastEvent;
     if (ev?.resource === '{map_key}' && String(ev.id) === page.params.id) {{
       if (ev.event === 'delete') goto('/{schema_name}/{table_name}');
-      else {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ item = d; {rname}State.setItem(d); }});
+      else {rname}Api.get(page.params.id).then(r => r.ok ? r.json() : null)
+                .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }});
     }}
   }});
 {fk_effects}{can_edit}{extra_script}
@@ -899,7 +916,12 @@ class SvelteAppGenerator(StoreGenerator):
         stores_dir = output_dir / 'src' / 'lib' / 'stores'
         SvelteGenerator().generate(classes, api_version, stores_dir)
 
-        # --- auth store + WS env var ---
+        # --- stateRegistry + auth store + WS env var ---
+        self._write(output_dir / 'src' / 'lib' / 'stateRegistry.ts',
+            "const _fns: Array<() => void> = [];\n"
+            "export const registerClear = (fn: () => void): void => { _fns.push(fn); };\n"
+            "export const clearAllStates = (): void => { _fns.forEach(fn => fn()); };\n"
+        )
         self._write(output_dir / 'src' / 'lib' / 'auth.svelte.ts', _auth_store(version_prefix))
         env_local = output_dir / '.env.local'
         if not env_local.exists():
