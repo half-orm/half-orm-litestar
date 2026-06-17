@@ -468,18 +468,39 @@ def _list_component(
   import {{ {rname}State, {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
   import type {{ {iname}Out }} from '$lib/stores/{stem}.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
-  import {{ untrack }} from 'svelte';
 {goto_import}
   let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
 
-  function _fetchItems() {{
-    {rname}Api.list(filters).then(r => r.json()).then(d => {{ {rname}State.setItems(d); }});
-  }}
+  const hasFilters = $derived(Object.keys(filters).length > 0);
 
-  $effect(() => {{ _fetchItems(); }});
+  const displayItems = $derived(
+    {rname}State.loaded && hasFilters
+      ? Array.from({rname}State.byId.values()).filter(item =>
+            Object.entries(filters).every(([k, v]) => String((item as any)[k]) === String(v)))
+      : {rname}State.items
+  );
 
   $effect(() => {{
-    if (auth.lastEvent?.resource === '{map_key}') untrack(_fetchItems);
+    if (!{rname}State.loaded) {{
+      const f = filters;
+      const filtered = hasFilters;
+      {rname}Api.list(f).then(r => r.json()).then(d => {{
+        if (filtered) {rname}State.mergeItems(d);
+        else {rname}State.setItems(d);
+      }});
+    }}
+  }});
+
+  $effect(() => {{
+    const ev = auth.lastEvent;
+    if (!ev || ev.resource !== '{map_key}') return;
+    if (ev.event === 'delete') {{
+      {rname}State.removeItem(String(ev.id));
+    }} else {{
+      {rname}Api.get(ev.id)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => {{ if (d) {rname}State.setItem(d); }});
+    }}
   }});
 {can_create}{can_delete}{delete_fn}
 </script>
@@ -499,7 +520,7 @@ def _list_component(
       </tr>
     </thead>
     <tbody>
-      {{#each {rname}State.items as item}}
+      {{#each displayItems as item}}
         {tr_open}
         {td_cols}
           {action_td}
@@ -760,18 +781,18 @@ def _detail_page(
   import {{ page }} from '$app/state';
   import {{ auth }} from '$lib/auth.svelte.ts';{fk_imports}{rev_imports}
 
-  const item = $derived({rname}State.byId.get(page.params.id) ?? null);
+  let item = $state<{iname}Out | null>({rname}State.byId.get(page.params.id) ?? null);
 {fk_states}
   $effect(() => {{
-    if (!{rname}State.byId.has(page.params.id))
-      {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ {rname}State.setItem(d); }});
+    if (!item)
+      {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ item = d; {rname}State.setItem(d); }});
   }});
 
   $effect(() => {{
     const ev = auth.lastEvent;
     if (ev?.resource === '{map_key}' && String(ev.id) === page.params.id) {{
       if (ev.event === 'delete') goto('/{schema_name}/{table_name}');
-      else {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ {rname}State.setItem(d); }});
+      else {rname}Api.get(page.params.id).then(r => r.json()).then(d => {{ item = d; {rname}State.setItem(d); }});
     }}
   }});
 {fk_effects}{can_edit}{extra_script}
