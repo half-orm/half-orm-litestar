@@ -31,6 +31,7 @@ _PACKAGE_JSON = """\
   "private": true,
   "type": "module",
   "scripts": {{
+    "prepare": "svelte-kit sync || true",
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
@@ -38,16 +39,16 @@ _PACKAGE_JSON = """\
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
   }},
   "devDependencies": {{
-    "@sveltejs/adapter-auto": "^3.0.0",
-    "@sveltejs/kit": "^2.0.0",
-    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@sveltejs/adapter-auto": "^7.0.0",
+    "@sveltejs/kit": "^2.65.2",
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
     "autoprefixer": "^10.4.0",
     "postcss": "^8.4.0",
-    "svelte": "^5.0.0",
+    "svelte": "^5.46.4",
     "svelte-check": "^4.0.0",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.0.0",
-    "vite": "^6.0.0"
+    "vite": "^8.0.0"
   }}
 }}
 """

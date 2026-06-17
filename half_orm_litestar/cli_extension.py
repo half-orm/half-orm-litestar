@@ -3,7 +3,8 @@ CLI extension for half-orm-litestar.
 
 Registers the ``litestar`` sub-command group under the ``half_orm`` CLI::
 
-    half_orm litestar generate
+    half_orm litestar api
+    half_orm litestar frontend
 """
 
 import sys
@@ -34,7 +35,7 @@ def add_commands(main_group):
         """Generate and manage a Litestar API from a halfORM project."""
         pass
 
-    @litestar.command()
+    @litestar.command('api')
     @click.option(
         '--dry-run', is_flag=True, default=False,
         help='Print what would be generated without writing any file.',
@@ -43,12 +44,12 @@ def add_commands(main_group):
         '--bump', is_flag=True, default=False,
         help='Bump the API version to N+1 (asks for confirmation).',
     )
-    @click.option(
-        '--fastapi', is_flag=True, default=False,
-        help='Generate a FastAPI app (uses templates_fastapi.py, no @api_* support).',
-    )
-    def generate(dry_run, bump, fastapi):
-        """Generate api/app.py from @api_* decorated halfORM methods.
+    @click.option('--litestar', 'framework', flag_value='litestar',
+                  help='Generate a Litestar app.')
+    @click.option('--fastapi', 'framework', flag_value='fastapi',
+                  help='Generate a FastAPI app (no @api_* support).')
+    def api(dry_run, bump, framework):
+        """Generate api/app.py from CRUD_ACCESS and @api_* decorated methods.
 
         The API version is read from api/.api_version (default: 0).
         Use --bump to move to N+1; the new value is saved for future runs.
@@ -57,8 +58,6 @@ def add_commands(main_group):
         Must be run from inside a half-orm-dev project directory.
         On first run, missing scaffolding files (guards.py, custom/) are
         created automatically and are never overwritten on subsequent runs.
-
-        Use --fastapi to generate a FastAPI app instead of Litestar.
         """
         try:
             from half_orm_dev.repo import Repo
@@ -80,8 +79,11 @@ def add_commands(main_group):
             )
             sys.exit(1)
 
+        if not framework:
+            click.echo('Error: specify --litestar or --fastapi.', err=True)
+            sys.exit(1)
+
         api_version = _read_api_version()
-        framework = 'fastapi' if fastapi else 'litestar'
 
         if bump:
             next_version = api_version + 1
@@ -102,13 +104,17 @@ def add_commands(main_group):
         from half_orm_litestar.generate import GenApi
         click.echo(f'Generating {framework} API for project: {repo.name} (v{api_version})')
         GenApi(repo, api_version=api_version, framework=framework)
+        if framework == 'litestar':
+            click.echo('\nTo run:  litestar --app api.app:application run --reload')
+        else:
+            click.echo('\nTo run:  uvicorn api.app:application --reload')
 
-    @litestar.command('gen-frontend')
+    @litestar.command('frontend')
     @click.option('--svelte', 'framework', flag_value='svelte', default=True,
                   help='Generate a SvelteKit 5 application (default).')
     @click.option('--output', default=None,
                   help='Output directory (default: frontend/<framework>).')
-    def gen_frontend(framework, output):
+    def frontend(framework, output):
         """Generate a throwaway SvelteKit POC from CRUD_ACCESS introspection.
 
         Produces a complete SvelteKit application with Tailwind CSS, Svelte 5
@@ -149,66 +155,6 @@ def add_commands(main_group):
         from half_orm_litestar.gen_app import GenApp
         click.echo(f'Generating {framework} application → {output_dir}')
         GenApp(repo, generator=generator, output_dir=output_dir, api_version=api_version)
-
-    @litestar.command('gen-store')
-    @click.option('--svelte', 'framework', flag_value='svelte', default=True,
-                  help='Generate Svelte/TypeScript stores (default).')
-    @click.option('--output', default=None,
-                  help='Output directory (default: frontend/<framework>).')
-    def gen_store(framework, output):
-        """Generate frontend stores from CRUD_ACCESS introspection.
-
-        Reads the same CRUD_ACCESS declarations used by `generate` and
-        produces one TypeScript file per resource plus an index.ts with
-        re-exports and a hoAccess() helper.
-
-        Must be run from inside a half-orm-dev project directory.
-        """
-        try:
-            from half_orm_dev.repo import Repo
-        except ImportError:
-            click.echo(
-                'Error: half_orm_dev is not installed. '
-                'Install it with: pip install half-orm-dev',
-                err=True,
-            )
-            import sys; sys.exit(1)
-
-        try:
-            repo = Repo()
-        except Exception as exc:
-            click.echo(
-                f'Error: could not load the halfORM project ({exc}).\n'
-                'Make sure you are inside a half-orm-dev project directory.',
-                err=True,
-            )
-            import sys; sys.exit(1)
-
-        api_version = _read_api_version()
-        output_dir = Path(output) if output else Path('frontend') / framework
-
         if framework == 'svelte':
-            from half_orm_litestar.gen_store.svelte import SvelteGenerator
-            generator = SvelteGenerator()
-        else:
-            click.echo(f'Error: unknown framework "{framework}".', err=True)
-            import sys; sys.exit(1)
+            click.echo(f'\nTo run:  cd {output_dir} && npm install && npm run dev')
 
-        from half_orm_litestar.gen_store import GenStore
-        click.echo(f'Generating {framework} stores → {output_dir}')
-        GenStore(repo, generator=generator, output_dir=output_dir, api_version=api_version)
-
-    @litestar.command(
-        context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
-    )
-    @click.argument('args', nargs=-1, type=click.UNPROCESSED)
-    def run(args):
-        """Run the Litestar app (proxy to `litestar run`).
-
-        All options are forwarded to `litestar run`, e.g.:
-
-            half_orm litestar run --reload --debug --port 8080
-        """
-        import subprocess
-        cmd = ['litestar', '--app', 'api.app:application', 'run'] + list(args)
-        sys.exit(subprocess.call(cmd))
