@@ -421,7 +421,8 @@ def _list_component(
             rs, rt = fk_map[f]
             return (
                 f'<td class="px-4 py-2 text-sm">'
-                f'<a href="/{rs}/{rt}/{{item.{f}}}" onclick={{(e) => e.stopPropagation()}}'
+                f'<a href="/{rs}/{rt}/{{item.{f}}}"'
+                f' onclick={{(e) => {{ e.preventDefault(); e.stopPropagation(); goto(`/{rs}/{rt}/${{item.{f}}}`); }}}}'
                 f' class="text-blue-500 hover:underline font-mono text-xs">{{item.{f}}}</a>'
                 f'</td>'
             )
