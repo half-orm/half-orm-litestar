@@ -114,6 +114,7 @@ class GenApi:
             scaffold_api_dir(self._api_dir)
 
         # --- write app.py ---
+        self._api_dir.mkdir(parents=True, exist_ok=True)
         app_py = self._api_dir / 'app.py'
         app_py.write_text(output, encoding='utf-8')
         print(f'\nGenerated {app_py}')
