@@ -34,9 +34,7 @@ class SvelteGenerator(StoreGenerator):
                 mod = importlib.import_module(module_str)
             except ImportError:
                 continue
-            crud_access = getattr(mod, 'CRUD_ACCESS', None)
-            if not crud_access:
-                continue
+            crud_access = getattr(mod, 'CRUD_ACCESS', None) or {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
             schema_name = relation._schemaname.replace('.', '_')
             table_name  = relation.__name__.lower()
             crud_resources.add((schema_name, table_name))
@@ -86,10 +84,14 @@ class SvelteGenerator(StoreGenerator):
             lines.append("import { registerClear } from '$lib/stateRegistry';")
             lines.append('')
 
-            # FK imports
+            # FK imports (deduplicated: skip self-referential FKs and multi-FK to same table)
+            seen_stems: set[str] = {stem}
             for local_field, remote_schema, remote_table, remote_pk in fk_deps:
+                remote_stem = f'{remote_schema}_{remote_table}'
+                if remote_stem in seen_stems:
+                    continue
+                seen_stems.add(remote_stem)
                 remote_rname = self.resource_name(remote_schema, remote_table)
-                remote_stem  = f'{remote_schema}_{remote_table}'
                 lines.append(
                     f"import {{ {remote_rname}State }} from './{remote_stem}.svelte.ts';"
                 )

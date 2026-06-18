@@ -51,6 +51,8 @@ _HO_WARN = """
   /ho_access : exposes the full access map filtered by role
   _get_roles : bearer token used directly as a role name
                (no signature verification)
+  ho_dev     : super-role with full access to all resources
+               (Authorization: Bearer ho_dev)
 
   Replace the Authorization middleware with a real JWT implementation
   before deploying to production.
@@ -84,7 +86,8 @@ if _has_custom:
 OPENAPI_CONFIG = """, title="{title}", version="{version}" """
 
 HO_ACCESS_ROUTE = (
-    '\n_ACCESS_MAP = {json_str}\n\n'
+    '\n_STATIC_ACCESS_MAP = {json_str}\n'
+    '\n_ACCESS_MAP = get_access_map()\n\n'
     '@router.get("{version_prefix}/ho_access")\n'
     'async def _crud_access_map(request: Request) -> dict:\n'
     '    authorized_roles = _get_roles(request)\n'
@@ -147,8 +150,8 @@ async def {handler_name}(
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     roles = _get_roles(request)
     filter_kwargs = {{{filter_dict}}}
-    role_filter = _get_role_filter({module_alias}.CRUD_ACCESS, "GET", roles)
-    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", roles, api_excluded)
+    role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
+    authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)
     if fields:
         projection = [f for f in fields if not authorized or f in authorized]
     else:
@@ -166,8 +169,8 @@ async def {handler_name}_get(
 ) -> dict:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     roles = _get_roles(request)
-    role_filter = _get_role_filter({module_alias}.CRUD_ACCESS, "GET", roles)
-    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", roles, api_excluded)
+    role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
+    authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)
     rows = await {module_alias}.{class_name}({pk_field}=id, **role_filter).ho_aselect(*authorized)
     if not rows:
         raise HTTPException(status_code=404)
@@ -181,7 +184,7 @@ async def {handler_name}_create(
     data: {in_typedict},
 ) -> dict:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
-    in_fields = _effective_in_fields({module_alias}.CRUD_ACCESS, "POST", _get_roles(request), api_excluded)
+    in_fields = _effective_in_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "POST", _get_roles(request), api_excluded)
     payload = {{k: v for k, v in data.model_dump(exclude_none=True).items() if not in_fields or k in in_fields}}
     result = await {module_alias}.{class_name}(**payload).ho_ainsert()
     await _manager.broadcast({{"event": "create", "resource": "{resource}", "id": result.get("{pk_field}")}})
@@ -196,9 +199,9 @@ async def {handler_name}_update(
     data: {in_typedict},
 ) -> dict:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
-    in_fields = _effective_in_fields({module_alias}.CRUD_ACCESS, "PUT", _get_roles(request), api_excluded)
+    in_fields = _effective_in_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "PUT", _get_roles(request), api_excluded)
     payload = {{k: v for k, v in data.model_dump(exclude_none=True).items() if not in_fields or k in in_fields}}
-    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "PUT", _get_roles(request), api_excluded)
+    authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "PUT", _get_roles(request), api_excluded)
     result = await {module_alias}.{class_name}({pk_field}=id).ho_aupdate(*(authorized or ['*']), **payload)
     if not result:
         raise HTTPException(status_code=404)

@@ -709,8 +709,12 @@ def _detail_page(
     # Forward FK reference imports, states, effects, sections
     def _fk_ref_imports(deps: list) -> str:
         lines = []
+        seen: set[str] = {stem}  # skip self-referential FK and deduplicate
         for _, rs, rt, _ in deps:
             s = f'{rs}_{rt}'
+            if s in seen:
+                continue
+            seen.add(s)
             rn = _rname(rs, rt)
             lines.append(f"  import {{ {rn}State, {rn}Api }} from '$lib/stores/{s}.svelte.ts';")
         return ('\n' + '\n'.join(lines)) if lines else ''
@@ -940,8 +944,6 @@ class SvelteAppGenerator(StoreGenerator):
                 mod = importlib.import_module(module_str)
             except ImportError:
                 continue
-            if not getattr(mod, 'CRUD_ACCESS', None):
-                continue
             schema_name = relation._schemaname.replace('.', '_')
             table_name  = relation.__name__.lower()
             crud_resources.add((schema_name, table_name))
@@ -950,7 +952,7 @@ class SvelteAppGenerator(StoreGenerator):
         # Pass 2: build per-resource metadata (needs complete crud_resources for fk_deps)
         resources = []
         for relation, mod in raw:
-            crud_access  = mod.CRUD_ACCESS
+            crud_access  = getattr(mod, 'CRUD_ACCESS', None) or {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
             api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', [])
             schema_name  = relation._schemaname.replace('.', '_')
             table_name   = relation.__name__.lower()

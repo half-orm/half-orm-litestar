@@ -213,9 +213,24 @@ def _effective_in_fields(crud_access, verb, authorized_roles, api_excluded=None)
     return [f for f in dict.fromkeys(fields) if f not in api_excluded]
 
 
+def get_access_map():
+    result = {}
+    for resource, verbs in _STATIC_ACCESS_MAP.items():
+        entry = {}
+        for verb, roles in verbs.items():
+            entry[verb] = dict(roles)
+        result[resource] = entry
+    if not MODEL._production_mode:
+        for resource, ho_verbs in _HO_DEV_MAP.items():
+            entry = result.setdefault(resource, {})
+            for verb, ho_val in ho_verbs.items():
+                verb_entry = dict(entry.get(verb, {}))
+                verb_entry['ho_dev'] = ho_val
+                entry[verb] = verb_entry
+    return result
+
+
 def _filter_access_for_roles(access_map, authorized_roles):
-    if not MODEL._production_mode and 'ho_dev' in authorized_roles:
-        return _HO_DEV_MAP
     result = {}
     for resource, verbs in access_map.items():
         resource_entry = {}
@@ -255,7 +270,8 @@ class {class_name}(TypedDict, total=False):
 CRUD_MODULE_IMPORT = "\nfrom {schema} import {module_name} as {module_alias}\n"
 
 HO_ACCESS_ROUTE = (
-    '\n_ACCESS_MAP = {json_str}\n\n'
+    '\n_STATIC_ACCESS_MAP = {json_str}\n'
+    '\n_ACCESS_MAP = get_access_map()\n\n'
     '@get("{version_prefix}/ho_access", guards=[guards.public])\n'
     'async def _crud_access_map(request: Request) -> dict:\n'
     '    authorized_roles = _get_roles(request)\n'
@@ -330,8 +346,8 @@ async def {handler_name}(
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     roles = _get_roles(request)
     filter_kwargs = {{{filter_dict}}}
-    role_filter = _get_role_filter({module_alias}.CRUD_ACCESS, "GET", roles)
-    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", roles, api_excluded)
+    role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
+    authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)
     if fields:
         projection = [f for f in fields if not authorized or f in authorized]
     else:
@@ -349,8 +365,8 @@ async def {handler_name}_get(
 ) -> {out_typedict}:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
     roles = _get_roles(request)
-    role_filter = _get_role_filter({module_alias}.CRUD_ACCESS, "GET", roles)
-    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "GET", roles, api_excluded)
+    role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
+    authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)
     rows = await {module_alias}.{class_name}({pk_field}=id, **role_filter).ho_aselect(*authorized)
     if not rows:
         raise HTTPException(status_code=404)
@@ -364,7 +380,7 @@ async def {handler_name}_create(
     data: {in_typedict},
 ) -> {out_typedict}:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
-    in_fields = _effective_in_fields({module_alias}.CRUD_ACCESS, "POST", _get_roles(request), api_excluded)
+    in_fields = _effective_in_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "POST", _get_roles(request), api_excluded)
     payload = {{k: v for k, v in dict(data).items() if v is not None and (not in_fields or k in in_fields)}}
     result = await {module_alias}.{class_name}(**payload).ho_ainsert()
     await _manager.broadcast({{"event": "create", "resource": "{resource}", "id": result.get("{pk_field}")}})
@@ -379,9 +395,9 @@ async def {handler_name}_update(
     data: {in_typedict},
 ) -> {out_typedict}:
     api_excluded = getattr({module_alias}, 'API_EXCLUDED_FIELDS', [])
-    in_fields = _effective_in_fields({module_alias}.CRUD_ACCESS, "PUT", _get_roles(request), api_excluded)
+    in_fields = _effective_in_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "PUT", _get_roles(request), api_excluded)
     payload = {{k: v for k, v in dict(data).items() if v is not None and (not in_fields or k in in_fields)}}
-    authorized = _effective_out_fields({module_alias}.CRUD_ACCESS, "PUT", _get_roles(request), api_excluded)
+    authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "PUT", _get_roles(request), api_excluded)
     result = await {module_alias}.{class_name}({pk_field}=id).ho_aupdate(*(authorized or ['*']), **payload)
     if not result:
         raise HTTPException(status_code=404)

@@ -425,7 +425,7 @@ def generate_crud_routes(
             if 'PUT' in crud_access and (module_str, 'PUT') not in covered:
                 ho_dev_entry['PUT'] = {'in': in_all, 'out': out_all}
             if 'DELETE' in crud_access and (module_str, 'DELETE') not in covered:
-                ho_dev_entry['DELETE'] = True
+                ho_dev_entry['DELETE'] = 'allowed'
         if ho_dev_entry:
             ho_dev_map[map_key] = ho_dev_entry
 
