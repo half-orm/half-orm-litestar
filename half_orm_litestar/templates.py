@@ -67,6 +67,8 @@ _HO_WARN = """
   /ho_access : exposes the full access map filtered by role
   _get_roles : bearer token used directly as a role name
                (no signature verification)
+  ho_dev     : super-role with full access to all resources
+               (Authorization: Bearer ho_dev)
 
   Replace the Authorization middleware with a real JWT implementation
   before deploying to production.
@@ -212,6 +214,15 @@ def _effective_in_fields(crud_access, verb, authorized_roles, api_excluded=None)
 
 
 def _filter_access_for_roles(access_map, authorized_roles):
+    if not MODEL._production_mode and 'ho_dev' in authorized_roles:
+        all_roles = {
+            role
+            for verbs in access_map.values()
+            for role_map in verbs.values()
+            if isinstance(role_map, dict)
+            for role in role_map
+        }
+        return _filter_access_for_roles(access_map, list(all_roles))
     result = {}
     for resource, verbs in access_map.items():
         resource_entry = {}

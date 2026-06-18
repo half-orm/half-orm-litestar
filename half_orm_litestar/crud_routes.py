@@ -257,7 +257,7 @@ def generate_crud_routes(
     handler_blocks: list[str] = [] # route handlers
     route_handlers: list[str] = []
     access_map: dict = {}
-    roles: set[str] = set()
+    roles: set[str] = {'ho_dev'}
     crud_resource_map: list[tuple] = []  # (resource, module_alias, class_name, pk_field)
 
     version_prefix = f'/v{api_version}' if api_version is not None else ''
@@ -276,7 +276,7 @@ def generate_crud_routes(
 
         crud_access = getattr(mod, 'CRUD_ACCESS', None)
         if not crud_access:
-            continue
+            crud_access = {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
 
         _validate_crud_access(crud_access, module_str)
 
