@@ -417,11 +417,37 @@ def _list_component(
     title    = _title(schema_name, table_name)
     fk_map   = {local: (rs, rt) for local, rs, rt, _ in fk_deps}
 
-    th_cols = '\n        '.join(
-        f'<th class="px-4 py-2 text-left text-sm font-semibold text-gray-600">{f}</th>'
+    def _sort_th(f: str) -> str:
+        toggle = (
+            f"() => {{ if (sortField === '{f}') sortAsc = !sortAsc;"
+            f" else {{ sortField = '{f}'; sortAsc = true; }} }}"
+        )
+        indicator = f"{{#if sortField === '{f}'}}{{sortAsc ? '↑' : '↓'}}{{/if}}"
+        return (
+            f'<th onclick={{{toggle}}}'
+            f' class="px-4 py-2 text-left text-sm font-semibold text-gray-600'
+            f' cursor-pointer select-none hover:bg-gray-200">'
+            f'{f} {indicator}</th>'
+        )
+
+    th_cols   = '\n        '.join(_sort_th(f) for f in out_names)
+    action_th = '<th class="px-4 py-2 w-20"></th>' if has_del and pk_field else ''
+
+    filter_inputs = '\n        '.join(
+        f'<th class="px-2 py-1">'
+        f'<input bind:value={{localFilters[\'{f}\']}} placeholder="…"'
+        f' class="w-full text-xs border rounded px-2 py-1 font-normal" /></th>'
         for f in out_names
     )
-    action_th = '<th class="px-4 py-2 w-20"></th>' if has_del and pk_field else ''
+    action_filter_th = '<th></th>' if has_del and pk_field else ''
+    filter_row = (
+        f'\n      {{#if !embedded}}\n'
+        f'      <tr class="bg-white border-b">\n'
+        f'        {filter_inputs}\n'
+        f'        {action_filter_th}\n'
+        f'      </tr>\n'
+        f'      {{/if}}'
+    )
 
     def _td(f: str) -> str:
         if f in fk_map:
@@ -495,14 +521,54 @@ def _list_component(
 
   const hasFilters = $derived(Object.keys(filters).length > 0);
 {"" if not pk_field else f"""
-  const displayItems = $derived(
-    hasFilters
+  let localFilters = $state<Record<string, string>>({{}});
+  let sortField    = $state<string | null>(null);
+  let sortAsc      = $state(true);
+
+  const displayItems = $derived.by(() => {{
+    let items: {iname}Out[] = hasFilters
       ? Array.from({rname}State.byId.values()).filter(item =>
             Object.entries(filters).every(([k, v]) => String((item as any)[k]) === String(v)))
-      : {rname}State.items
-  );
+      : {rname}State.items;
+    const lf = localFilters;
+    if (Object.values(lf).some(v => v))
+      items = items.filter(item =>
+        Object.entries(lf).every(([k, v]) =>
+          !v || String((item as any)[k] ?? '').toLowerCase().includes(v.toLowerCase())));
+    const sf = sortField;
+    if (sf) {{
+      const asc = sortAsc;
+      items = [...items].sort((a, b) => {{
+        const av = String((a as any)[sf] ?? '');
+        const bv = String((b as any)[sf] ?? '');
+        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      }});
+    }}
+    return items;
+  }});
 """.rstrip()}{"" if pk_field else f"""
-  const displayItems = $derived({rname}State.items);
+  let localFilters = $state<Record<string, string>>({{}});
+  let sortField    = $state<string | null>(null);
+  let sortAsc      = $state(true);
+
+  const displayItems = $derived.by(() => {{
+    let items: {iname}Out[] = {rname}State.items;
+    const lf = localFilters;
+    if (Object.values(lf).some(v => v))
+      items = items.filter(item =>
+        Object.entries(lf).every(([k, v]) =>
+          !v || String((item as any)[k] ?? '').toLowerCase().includes(v.toLowerCase())));
+    const sf = sortField;
+    if (sf) {{
+      const asc = sortAsc;
+      items = [...items].sort((a, b) => {{
+        const av = String((a as any)[sf] ?? '');
+        const bv = String((b as any)[sf] ?? '');
+        return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      }});
+    }}
+    return items;
+  }});
 """.rstrip()}
 
   $effect(() => {{
@@ -543,7 +609,7 @@ def _list_component(
       <tr>
       {th_cols}
         {action_th}
-      </tr>
+      </tr>{filter_row}
     </thead>
     <tbody>
       {{#each displayItems as item}}
