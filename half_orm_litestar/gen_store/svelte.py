@@ -248,29 +248,6 @@ export class BaseState<V> {
         base_file.write_text(content, encoding='utf-8')
         print(f'  {base_file}')
 
-    def _fk_deps(self, inst, out_names: list, crud_resources: set) -> list:
-        """Return (local_field, remote_schema, remote_table, remote_pk) for each
-        simple non-reverse FK whose local field is in out_names and whose remote
-        table has CRUD_ACCESS."""
-        deps = []
-        for fk in getattr(inst, '_ho_fkeys', {}).values():
-            if fk.is_reverse:
-                continue
-            local_fields = fk.names
-            remote_pks   = fk.fk_names
-            if len(local_fields) != 1 or len(remote_pks) != 1:
-                continue
-            local_field = local_fields[0]
-            if local_field not in out_names:
-                continue
-            fqtn = fk.remote['fqtn']   # (schema, table)
-            remote_schema = fqtn[0].replace('.', '_')
-            remote_table  = fqtn[1]
-            if (remote_schema, remote_table) not in crud_resources:
-                continue
-            deps.append((local_field, remote_schema, remote_table, remote_pks[0]))
-        return deps
-
     def _interface(self, name: str, field_names: list, all_fields: dict) -> str:
         if not field_names:
             return f'export interface {name} {{}}\n'
