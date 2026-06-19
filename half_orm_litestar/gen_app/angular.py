@@ -772,10 +772,15 @@ def _list_component(
             return (
                 f'<td class="px-4 py-2 text-sm">'
                 f'<a [routerLink]="[\'/{rs}/{rt}\', item.{f}]" (click)="$event.stopPropagation()"'
-                f' class="text-blue-500 hover:underline font-mono text-xs">{{{{ item.{f} }}}}</a>'
+                f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
+                f' [title]="item.{f}">{{{{ item.{f} }}}}</a>'
                 f'</td>'
             )
-        return f'<td class="px-4 py-2 text-sm">{{{{ item.{f} }}}}</td>'
+        return (
+            f'<td class="px-4 py-2 text-sm">'
+            f'<div class="truncate max-w-xs" [title]="item.{f}">{{{{ item.{f} }}}}</div>'
+            f'</td>'
+        )
 
     td_cols = '\n              '.join(_td(f) for f in out_names)
 
@@ -867,7 +872,7 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
         <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
       </div>
     }}
-    <div class="bg-white shadow-sm rounded-lg overflow-hidden">
+    <div [class]="embedded ? '' : 'bg-white shadow-sm rounded-lg overflow-hidden'">
       <table class="w-full border-collapse">
         <thead class="bg-gray-100">
           <tr>
@@ -1105,7 +1110,7 @@ def _detail_component(
         rt_title = _title(rs, rt)
         fk_sections += f"""
     @if (item()?.{lf}) {{
-      <div class="max-w-2xl mx-auto mt-4 p-6 bg-white rounded-lg shadow">
+      <div class="mt-4 p-6 bg-white rounded-lg shadow">
         <div class="flex justify-between items-center mb-3">
           <h2 class="text-lg font-semibold">{rt_title}</h2>
           <a [routerLink]="['/{rs}/{rt}', item()!.{lf}]" class="text-sm text-blue-600 hover:underline">→</a>
@@ -1129,12 +1134,24 @@ def _detail_component(
         cn = _cname(rs, rt)
         rt_title = _title(rs, rt)
         rev_sections += f"""
-    <div class="max-w-2xl mx-auto mt-4 p-6 bg-white rounded-lg shadow">
-      <h2 class="text-lg font-semibold mb-3">{rt_title}</h2>
+    <div class="mt-4 bg-white rounded-lg shadow overflow-hidden">
+      <div class="px-6 pt-5 pb-3">
+        <h2 class="text-lg font-semibold">{rt_title}</h2>
+      </div>
       @if (item()) {{
         <{_selector(rs, rt, 'list')} [filters]="{{ {fk_field}: item()!.{pk_field} }}" [embedded]="true" />
       }}
     </div>"""
+
+    right_col = ''
+    if fk_deps:
+        right_col += '\n      <p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">↗ Direct references</p>'
+        right_col += fk_sections
+    if rev_fk_deps:
+        if fk_deps:
+            right_col += '\n      <hr class="my-6 border-gray-200">'
+        right_col += '\n      <p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">↙ Related</p>'
+        right_col += rev_sections
 
     handle_update = ''
     if has_put and put_in_names:
@@ -1187,23 +1204,29 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_store_imports}{re
   standalone: true,
   imports: [{all_imports}],
   template: `
-    @if (item()) {{
-      <div class="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow mt-6">
-        <div class="flex justify-between items-start mb-6">
-          <h1 class="text-2xl font-bold">{title}</h1>
-          <div class="flex gap-3 items-center">{edit_btn_tmpl}
-            <a routerLink="/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 px-4">
+      <div class="min-w-0">
+        @if (item()) {{
+          <div class="p-6 bg-white rounded-lg shadow">
+            <div class="flex justify-between items-start mb-6">
+              <h1 class="text-2xl font-bold">{title}</h1>
+              <div class="flex gap-3 items-center">{edit_btn_tmpl}
+                <a routerLink="/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
+              </div>
+            </div>
+            <div class="space-y-2 mb-4">
+              <div class="flex gap-2 items-baseline">
+                <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
+                <span class="font-mono text-xs text-gray-500 break-all">{{{{ item()!.{pk_field} }}}}</span>
+              </div>
+              {ro_rows}
+            </div>{edit_section_tmpl}
           </div>
-        </div>
-        <div class="space-y-2 mb-4">
-          <div class="flex gap-2 items-baseline">
-            <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
-            <span class="font-mono text-xs text-gray-500 break-all">{{{{ item()!.{pk_field} }}}}</span>
-          </div>
-          {ro_rows}
-        </div>{edit_section_tmpl}
+        }}
       </div>
-    }}{fk_sections}{rev_sections}
+      <div class="min-w-0">{right_col}
+      </div>
+    </div>
   `
 }})
 export class {iname}DetailComponent {{

@@ -430,10 +430,15 @@ def _list_component(
                 f'<td class="px-4 py-2 text-sm">'
                 f'<a href="/{rs}/{rt}/{{item.{f}}}"'
                 f' onclick={{(e) => {{ e.preventDefault(); e.stopPropagation(); goto(`/{rs}/{rt}/${{item.{f}}}`); }}}}'
-                f' class="text-blue-500 hover:underline font-mono text-xs">{{item.{f}}}</a>'
+                f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
+                f' title="{{String(item.{f})}}">{{item.{f}}}</a>'
                 f'</td>'
             )
-        return f'<td class="px-4 py-2 text-sm">{{item.{f} ?? ""}}</td>'
+        return (
+            f'<td class="px-4 py-2 text-sm">'
+            f'<div class="truncate max-w-xs" title="{{String(item.{f} ?? \'\')}}">'
+            f'{{item.{f} ?? ""}}</div></td>'
+        )
 
     td_cols = '\n          '.join(_td(f) for f in out_names)
 
@@ -532,7 +537,7 @@ def _list_component(
 </div>
 {{/if}}
 
-<div class="bg-white shadow-sm rounded-lg overflow-hidden">
+<div class="{{embedded ? '' : 'bg-white shadow-sm rounded-lg overflow-hidden'}}">
   <table class="w-full border-collapse">
     <thead class="bg-gray-100">
       <tr>
@@ -766,7 +771,7 @@ def _detail_page(
         lf_ref = _lf_ref_name(lf)
         return (
             f'\n{{#if {lf_ref}}}\n'
-            f'<div class="max-w-2xl mx-auto mt-4 p-6 bg-white rounded-lg shadow">\n'
+            f'<div class="mt-4 p-6 bg-white rounded-lg shadow">\n'
             f'  <div class="flex justify-between items-center mb-3">\n'
             f'    <h2 class="text-lg font-semibold">{_title(rs, rt)}</h2>\n'
             f'    <a href="/{rs}/{rt}/{{{lf_ref}.{remote_pk}}}"'
@@ -800,8 +805,10 @@ def _detail_page(
     def _rev_section(rs: str, rt: str, fk_field: str) -> str:
         cn = _cname(rs, rt)
         return (
-            f'\n<div class="max-w-2xl mx-auto mt-4 p-6 bg-white rounded-lg shadow">\n'
-            f'  <h2 class="text-lg font-semibold mb-3">{_title(rs, rt)}</h2>\n'
+            f'\n<div class="mt-4 bg-white rounded-lg shadow overflow-hidden">\n'
+            f'  <div class="px-6 pt-5 pb-3">\n'
+            f'    <h2 class="text-lg font-semibold">{_title(rs, rt)}</h2>\n'
+            f'  </div>\n'
             f'  {{#if item}}\n'
             f'    <{cn}List filters={{{{ {fk_field}: item.{pk_field} }}}} embedded />\n'
             f'  {{/if}}\n'
@@ -809,6 +816,16 @@ def _detail_page(
         )
 
     rev_sections = '\n'.join(_rev_section(rs, rt, fk) for rs, rt, fk in rev_fk_deps)
+
+    right_col = ''
+    if fk_deps:
+        right_col += '\n<p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">↗ Direct references</p>'
+        right_col += fk_sections
+    if rev_fk_deps:
+        if fk_deps:
+            right_col += '\n<hr class="my-6 border-gray-200">'
+        right_col += '\n<p class="mt-4 px-1 text-xs font-semibold uppercase tracking-wide text-gray-400">↙ Related</p>'
+        right_col += '\n' + rev_sections
 
     return f"""\
 <script lang="ts">
@@ -841,27 +858,32 @@ def _detail_page(
 {fk_effects}{can_edit}{extra_script}
 </script>
 
-{{#if item}}
-<div class="max-w-2xl mx-auto p-6 bg-white rounded-lg shadow mt-6">
-  <div class="flex justify-between items-start mb-6">
-    <h1 class="text-2xl font-bold">{title}</h1>
-    <div class="flex gap-3 items-center">
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 px-4">
+  <div class="min-w-0">
+    {{#if item}}
+    <div class="p-6 bg-white rounded-lg shadow">
+      <div class="flex justify-between items-start mb-6">
+        <h1 class="text-2xl font-bold">{title}</h1>
+        <div class="flex gap-3 items-center">
 {edit_btn_wrap}
-      <a href="/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
-    </div>
-  </div>
+          <a href="/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
+        </div>
+      </div>
 
-  <div class="space-y-2 mb-4">
-    <div class="flex gap-2 items-baseline">
-      <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
-      <span class="font-mono text-xs text-gray-500 break-all">{{item.{pk_field}}}</span>
+      <div class="space-y-2 mb-4">
+        <div class="flex gap-2 items-baseline">
+          <span class="font-medium text-gray-600 w-36 shrink-0">{pk_field}</span>
+          <span class="font-mono text-xs text-gray-500 break-all">{{item.{pk_field}}}</span>
+        </div>
+        {ro_fields}
+      </div>{edit_section}
     </div>
-    {ro_fields}
-  </div>{edit_section}
+    {{/if}}
+  </div>
+  <div class="min-w-0">
+    {right_col}
+  </div>
 </div>
-{{/if}}
-{fk_sections}
-{rev_sections}
 """
 
 
