@@ -349,10 +349,8 @@ def _title(schema_name: str, table_name: str) -> str:
 
 
 def _layout(resources: list) -> str:
-    nav_links = '\n      '.join(
-        f'<a href="/{sn}/{tn}"'
-        f' class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">'
-        f'{_title(sn, tn)}</a>'
+    nav_items_js = ',\n    '.join(
+        f'{{ href: "/{sn}/{tn}", label: "{_title(sn, tn)}" }}'
         for sn, tn, *_ in resources
     )
     return f"""\
@@ -361,6 +359,15 @@ def _layout(resources: list) -> str:
   import {{ auth }} from '$lib/auth.svelte.ts';
 
   let {{ children }} = $props();
+  let navFilter = $state('');
+  const navItems = [
+    {nav_items_js}
+  ];
+  const filteredNav = $derived(
+    navFilter
+      ? navItems.filter(i => i.label.toLowerCase().includes(navFilter.toLowerCase()))
+      : navItems
+  );
 </script>
 
 <div class="h-screen flex bg-gray-50 overflow-hidden">
@@ -368,8 +375,17 @@ def _layout(resources: list) -> str:
     <div class="px-4 py-4 border-b">
       <span class="font-bold text-gray-800">API Browser</span>
     </div>
-    <nav class="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
-      {nav_links}
+    <div class="px-2 pt-2 pb-1">
+      <input bind:value={{navFilter}} placeholder="Filter…"
+             class="w-full text-xs border rounded px-2 py-1 text-gray-700"/>
+    </div>
+    <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
+      {{#each filteredNav as item}}
+        <a href={{item.href}}
+           class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">
+          {{item.label}}
+        </a>
+      {{/each}}
     </nav>
     <div class="px-2 py-3 border-t">
       <a href="/access"
@@ -647,7 +663,7 @@ def _list_component(
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 cursor-default"
      onclick={{() => jsonDialog = null}}
      onkeydown={{(e) => e.key === 'Escape' && (jsonDialog = null)}}>
-  <div role="dialog" aria-modal="true" aria-label="JSON"
+  <div role="dialog" aria-modal="true" aria-label="JSON" tabindex="-1"
        class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 p-6"
        onclick={{(e) => e.stopPropagation()}}
        onkeydown={{(e) => e.stopPropagation()}}>

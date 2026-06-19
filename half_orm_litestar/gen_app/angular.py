@@ -329,14 +329,12 @@ export class AuthService {{
 
 
 def _app_component(resources: list) -> str:
-    nav_links = '\n      '.join(
-        f'<a routerLink="/{sn}/{tn}" routerLinkActive="bg-gray-100 font-semibold"'
-        f' class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">'
-        f'{_title(sn, tn)}</a>'
+    nav_items_js = ',\n      '.join(
+        f'{{ href: "/{sn}/{tn}", label: "{_title(sn, tn)}" }}'
         for sn, tn, *_ in resources
     )
     return f"""\
-import {{ Component, inject, OnInit }} from '@angular/core';
+import {{ Component, computed, inject, OnInit, signal }} from '@angular/core';
 import {{ RouterLink, RouterLinkActive, RouterOutlet }} from '@angular/router';
 import {{ AuthService }} from './core/auth.service';
 
@@ -350,8 +348,18 @@ import {{ AuthService }} from './core/auth.service';
         <div class="px-4 py-4 border-b">
           <span class="font-bold text-gray-800">API Browser</span>
         </div>
-        <nav class="flex-1 overflow-y-auto px-2 py-3 space-y-0.5">
-          {nav_links}
+        <div class="px-2 pt-2 pb-1">
+          <input [value]="navFilter()" (input)="navFilter.set($any($event).target.value)"
+                 placeholder="Filter…"
+                 class="w-full text-xs border rounded px-2 py-1 text-gray-700"/>
+        </div>
+        <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
+          @for (item of filteredNav(); track item.href) {{
+            <a [routerLink]="item.href" routerLinkActive="bg-gray-100 font-semibold"
+               class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">
+              {{{{ item.label }}}}
+            </a>
+          }}
         </nav>
         <div class="px-2 py-3 border-t">
           <a routerLink="/access" class="block px-3 py-2 rounded hover:bg-gray-100">
@@ -370,6 +378,16 @@ import {{ AuthService }} from './core/auth.service';
 }})
 export class AppComponent implements OnInit {{
   protected auth = inject(AuthService);
+
+  navFilter = signal('');
+  readonly navItems = [
+      {nav_items_js}
+  ];
+  readonly filteredNav = computed(() =>
+    this.navFilter()
+      ? this.navItems.filter(i => i.label.toLowerCase().includes(this.navFilter().toLowerCase()))
+      : this.navItems
+  );
 
   ngOnInit(): void {{
     void this.auth._fetchAccess();
