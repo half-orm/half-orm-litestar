@@ -1030,12 +1030,20 @@ def _is_text_field(f: str, all_fields: dict) -> bool:
     return f in all_fields and _py_type_str(all_fields[f].py_type) == 'str'
 
 
+def _is_required(f: str, all_fields: dict) -> bool:
+    fo = all_fields.get(f)
+    return bool(fo and fo.is_not_null() and fo.has_default_value is None)
+
+
 def _text_fields_ts(field_names: list, all_fields: dict) -> str:
     text = [f for f in field_names if _is_text_field(f, all_fields)]
     return ', '.join(repr(f) for f in text)
 
 
 def _ng_form_field(f: str, all_fields: dict) -> str:
+    req      = _is_required(f, all_fields)
+    req_attr = ' required' if req else ''
+    req_mark = ' <span class="text-red-500">*</span>' if req else ''
     if _is_bool_field(f, all_fields):
         return (
             f'<div class="flex items-center gap-2">\n'
@@ -1046,8 +1054,8 @@ def _ng_form_field(f: str, all_fields: dict) -> str:
         )
     return (
         f'<div>\n'
-        f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
-        f'        <input [(ngModel)]="form.{f}" name="{f}"\n'
+        f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
+        f'        <input [(ngModel)]="form.{f}" name="{f}"{req_attr}\n'
         f'               class="w-full border rounded px-3 py-2 text-sm" />\n'
         f'      </div>'
     )
@@ -1105,11 +1113,11 @@ import type {{ {iname}PostIn }} from '../../../stores/{schema_name}_{table_name}
     <div class="max-w-lg mx-auto p-6 bg-white rounded-lg shadow mt-6">
       <h1 class="text-2xl font-bold mb-6">New {title}</h1>
       @if (error()) {{ <p class="text-red-600 mb-4">{{{{ error() }}}}</p> }}
-      <form (ngSubmit)="handleSubmit()" class="space-y-4">
+      <form #ngForm="ngForm" (ngSubmit)="handleSubmit()" class="space-y-4">
         {form_fields}
         <div class="flex gap-3 pt-2">
-          <button type="submit"
-                  class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
+          <button type="submit" [disabled]="ngForm.invalid"
+                  class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
             Create
           </button>
           <a routerLink="/{schema_name}/{table_name}"
@@ -1243,11 +1251,11 @@ def _detail_component(
     @if (editing()) {{
       <div class="mt-6 pt-6 border-t">
         @if (error()) {{ <p class="text-red-600 mb-4">{{{{ error() }}}}</p> }}
-        <form (ngSubmit)="handleUpdate()" class="space-y-4">
+        <form #editForm="ngForm" (ngSubmit)="handleUpdate()" class="space-y-4">
           {form_fields_tmpl}
           <div class="flex gap-3 pt-2">
-            <button type="submit"
-                    class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
+            <button type="submit" [disabled]="editForm.invalid"
+                    class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
               Update
             </button>
             <button type="button" (click)="editing.set(false)"

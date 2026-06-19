@@ -697,6 +697,11 @@ def _is_text_field(f: str, all_fields: dict) -> bool:
     return f in all_fields and _py_type_str(all_fields[f].py_type) == 'str'
 
 
+def _is_required(f: str, all_fields: dict) -> bool:
+    fo = all_fields.get(f)
+    return bool(fo and fo.is_not_null() and fo.has_default_value is None)
+
+
 def _text_fields_js(field_names: list, all_fields: dict) -> str:
     text = [f for f in field_names if _is_text_field(f, all_fields)]
     return ', '.join(f"'{f}'" for f in text)
@@ -707,6 +712,9 @@ def _null_map_js(text_fields_var: str = 'textFields') -> str:
 
 
 def _svelte_form_field(f: str, all_fields: dict, bind_prefix: str = 'form') -> str:
+    req      = _is_required(f, all_fields)
+    req_attr = ' required' if req else ''
+    req_mark = ' <span class="text-red-500">*</span>' if req else ''
     if _is_bool_field(f, all_fields):
         return (
             f'<div class="flex items-center gap-2">\n'
@@ -717,8 +725,8 @@ def _svelte_form_field(f: str, all_fields: dict, bind_prefix: str = 'form') -> s
         )
     return (
         f'<div>\n'
-        f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
-        f'      <input id="f_{f}" bind:value={{{bind_prefix}.{f}}}\n'
+        f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
+        f'      <input id="f_{f}" bind:value={{{bind_prefix}.{f}}}{req_attr}\n'
         f'             class="w-full border rounded px-3 py-2 text-sm" />\n'
         f'    </div>'
     )
