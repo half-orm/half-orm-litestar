@@ -112,18 +112,23 @@ def _gen_out_fields(crud_access: dict, verb: str, api_excluded: list, all_field_
 
 
 def _gen_in_fields(crud_access: dict, verb: str, pk_field: str,
-                   api_excluded: list, all_field_names: list) -> list:
-    """Union of in fields across all roles for a verb, minus PK and excluded."""
+                   api_excluded: list, all_field_names: list,
+                   pk_has_default: bool = True) -> list:
+    """Union of in fields across all roles for a verb, minus excluded fields.
+    PK is excluded only when pk_has_default is True (DB generates it).
+    For PUT the PK is always excluded (it comes from the URL path).
+    """
+    exclude_pk = pk_field if pk_has_default else None
     collected = []
     for role in crud_access.get(verb, {}):
         in_val = _resolved_in(crud_access, verb, role)
         if in_val is None:
-            return [f for f in all_field_names if f != pk_field and f not in api_excluded]
+            return [f for f in all_field_names if f != exclude_pk and f not in api_excluded]
         collected.extend(in_val)
     seen = set()
     result = []
     for f in collected:
-        if f not in seen and f not in api_excluded and f != pk_field and f in all_field_names:
+        if f not in seen and f not in api_excluded and f != exclude_pk and f in all_field_names:
             seen.add(f)
             result.append(f)
     return result
@@ -367,9 +372,17 @@ def generate_crud_routes(
 
         # Write verbs — tables only
         if is_table and pk_info:
+            pk_has_default = bool(
+                pk_field and all_fields.get(pk_field) and
+                all_fields[pk_field].has_default_value is not None
+            )
             if (module_str, 'POST') not in covered and 'POST' in crud_access:
                 post_in_class = f'_In_{module_alias}_post'
-                post_in_names = _gen_in_fields(crud_access, 'POST', pk_field, api_excluded, all_names)
+                post_in_names = _gen_in_fields(crud_access, 'POST', pk_field, api_excluded, all_names,
+                                               pk_has_default)
+                if not post_in_names:
+                    post_in_names = [f for f in all_names
+                                     if (f != pk_field or not pk_has_default) and f not in api_excluded]
                 decl_blocks.append('\n' + templates.typedict_block(post_in_class, post_in_names, all_fields) + '\n')
                 handler_name = f'{handler_prefix}_create'
                 handler_blocks.append(templates.CRUD_POST.format(

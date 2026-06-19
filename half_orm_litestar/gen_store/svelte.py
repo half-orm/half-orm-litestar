@@ -239,10 +239,14 @@ export class BaseState<V> {
         this.byId = m;
     }
     setItem(item: V) {
-        this.byId.set(this.pk(item), item);
+        const m = new Map(this.byId);
+        m.set(this.pk(item), item);
+        this.byId = m;
     }
     removeItem(id: string) {
-        this.byId.delete(id);
+        const m = new Map(this.byId);
+        m.delete(id);
+        this.byId = m;
     }
 }
 """

@@ -693,9 +693,11 @@ def _new_page(
     schema_name: str, table_name: str,
     stem: str, rname: str, iname: str,
     post_in_names: list, all_fields: dict,
+    optional_post_fields: frozenset = frozenset(),
 ) -> str:
     title = _title(schema_name, table_name)
     fields_init = ', '.join(f'{f}: ""' for f in post_in_names)
+    optional_set_js = ', '.join(f"'{f}'" for f in optional_post_fields)
     form_fields = '\n    '.join(
         f'<div>\n'
         f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
@@ -706,18 +708,26 @@ def _new_page(
     )
     return f"""\
 <script lang="ts">
-  import {{ {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
+  import {{ {rname}Api, {rname}State }} from '$lib/stores/{stem}.svelte.ts';
   import type {{ {iname}PostIn }} from '$lib/stores/{stem}.svelte.ts';
   import {{ goto }} from '$app/navigation';
 
   let form = $state<{iname}PostIn>({{ {fields_init} }});
   let error = $state('');
 
+  const optionalFields = new Set([{optional_set_js}]);
+
   async function handleSubmit(e: Event) {{
     e.preventDefault();
     try {{
-      const res = await {rname}Api.create(form);
+      const payload = Object.fromEntries(
+        Object.entries(form as unknown as Record<string, unknown>)
+          .filter(([k, v]) => !optionalFields.has(k) || v !== '')
+      ) as unknown as {iname}PostIn;
+      const res = await {rname}Api.create(payload);
       if (!res.ok) throw new Error(await res.text());
+      const created = await res.json();
+      {rname}State.setItem(created);
       goto('/{schema_name}/{table_name}');
     }} catch (err: any) {{
       error = err.message;
@@ -1089,9 +1099,18 @@ class SvelteAppGenerator(StoreGenerator):
             has_put  = 'PUT'  in crud_access and bool(pk_info)
             has_del  = 'DELETE' in crud_access and bool(pk_info)
 
-            _non_pk = [f for f in all_names if f != pk_field and f not in api_excluded]
+            pk_has_default = bool(
+                pk_field and all_fields.get(pk_field) and
+                all_fields[pk_field].has_default_value is not None
+            )
+            fields_with_defaults = {
+                f for f in all_names
+                if all_fields.get(f) and all_fields[f].has_default_value is not None
+            }
+            _non_pk = [f for f in all_names
+                       if (f != pk_field or not pk_has_default) and f not in api_excluded]
             post_in_names = _gen_in_fields(
-                crud_access, 'POST', pk_field, api_excluded, all_names
+                crud_access, 'POST', pk_field, api_excluded, all_names, pk_has_default
             ) if has_post else []
             if has_post and not post_in_names:
                 post_in_names = _non_pk
@@ -1100,6 +1119,7 @@ class SvelteAppGenerator(StoreGenerator):
             ) if has_put else []
             if has_put and not put_in_names:
                 put_in_names = _non_pk
+            optional_post_fields = frozenset(f for f in post_in_names if f in fields_with_defaults)
 
             fk_deps     = self._fk_deps(inst, out_names, crud_resources)
             rev_fk_deps = self._reverse_fk_deps(inst, pk_field, crud_resources)
@@ -1109,6 +1129,7 @@ class SvelteAppGenerator(StoreGenerator):
                 out_names, pk_info, pk_field, all_fields,
                 has_post, has_put, has_del,
                 post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps,
+                optional_post_fields,
             ))
 
         # --- layout + home ---
@@ -1127,7 +1148,8 @@ class SvelteAppGenerator(StoreGenerator):
         for (schema_name, table_name, stem, rname, iname,
              out_names, pk_info, pk_field, all_fields,
              has_post, has_put, has_del,
-             post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps) in resources:
+             post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps,
+             optional_post_fields) in resources:
             self._write(
                 components_dir / f'{stem}_list.svelte',
                 _list_component(schema_name, table_name, stem, rname, iname,
@@ -1138,7 +1160,8 @@ class SvelteAppGenerator(StoreGenerator):
         for (schema_name, table_name, stem, rname, iname,
              out_names, pk_info, pk_field, all_fields,
              has_post, has_put, has_del,
-             post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps) in resources:
+             post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps,
+             optional_post_fields) in resources:
 
             res_dir = routes_dir / schema_name / table_name
 
@@ -1150,7 +1173,7 @@ class SvelteAppGenerator(StoreGenerator):
                 self._write(
                     res_dir / 'new' / '+page.svelte',
                     _new_page(schema_name, table_name, stem, rname, iname,
-                              post_in_names, all_fields),
+                              post_in_names, all_fields, optional_post_fields),
                 )
 
             # detail (GET by pk)

@@ -1026,6 +1026,7 @@ def _create_component(
     schema_name: str, table_name: str,
     iname: str,
     post_in_names: list, all_fields: dict,
+    optional_post_fields: frozenset = frozenset(),
 ) -> str:
     title = _title(schema_name, table_name)
     fields_ts = ', '.join(f'{f}: \'\'  as any' for f in post_in_names)
@@ -1038,6 +1039,22 @@ def _create_component(
         f'      </div>'
         for f in post_in_names
     )
+
+    optional_set_ts = (
+        f"  private readonly optionalFields = new Set([{', '.join(repr(f) for f in sorted(optional_post_fields))}]);\n"
+        if optional_post_fields else ''
+    )
+
+    if optional_post_fields:
+        submit_body = (
+            "    const payload = Object.fromEntries(\n"
+            "      Object.entries(this.form as unknown as Record<string, unknown>)\n"
+            "        .filter(([k, v]) => !this.optionalFields.has(k) || v !== '')\n"
+            f"    ) as unknown as {iname}PostIn;\n"
+            "    this.store.create(payload).subscribe({"
+        )
+    else:
+        submit_body = "    this.store.create(this.form).subscribe({"
 
     return f"""\
 import {{ Component, inject, signal }} from '@angular/core';
@@ -1071,12 +1088,12 @@ import type {{ {iname}PostIn }} from '../../../stores/{schema_name}_{table_name}
 export class {iname}CreateComponent {{
   private store  = inject({iname}Store);
   private router = inject(Router);
-
+{optional_set_ts}
   form: {iname}PostIn = {{ {fields_ts} }};
   readonly error = signal('');
 
   handleSubmit(): void {{
-    this.store.create(this.form).subscribe({{
+    {submit_body}
       next: (item) => {{
         this.store.setItem(item);
         void this.router.navigate(['/{schema_name}/{table_name}']);
@@ -1450,13 +1467,24 @@ class AngularAppGenerator(StoreGenerator):
             has_del    = 'DELETE' in crud_access and bool(pk_info)
             has_detail = 'GET'    in crud_access and bool(pk_info)
 
-            _non_pk = [f for f in all_names if f != pk_field and f not in api_excluded]
-            post_in_names = _gen_in_fields(crud_access, 'POST', pk_field, api_excluded, all_names) if has_post else []
+            pk_has_default = bool(
+                pk_field and all_fields.get(pk_field) and
+                all_fields[pk_field].has_default_value is not None
+            )
+            fields_with_defaults = {
+                f for f in all_names
+                if all_fields.get(f) and all_fields[f].has_default_value is not None
+            }
+            _non_pk = [f for f in all_names
+                       if (f != pk_field or not pk_has_default) and f not in api_excluded]
+            post_in_names = _gen_in_fields(crud_access, 'POST', pk_field, api_excluded, all_names,
+                                           pk_has_default) if has_post else []
             if has_post and not post_in_names:
                 post_in_names = _non_pk
             put_in_names  = _gen_in_fields(crud_access, 'PUT',  pk_field, api_excluded, all_names) if has_put  else []
             if has_put and not put_in_names:
                 put_in_names = _non_pk
+            optional_post_fields = frozenset(f for f in post_in_names if f in fields_with_defaults)
 
             fk_deps     = self._fk_deps(inst, out_names, detail_resources)
             rev_fk_deps = self._reverse_fk_deps(inst, pk_field, crud_resources)
@@ -1469,6 +1497,7 @@ class AngularAppGenerator(StoreGenerator):
                 has_post, has_put, has_del, has_detail,
                 post_in_names, put_in_names,
                 fk_deps, rev_fk_deps,
+                optional_post_fields,
             ))
 
         # --- stores ---
@@ -1477,7 +1506,8 @@ class AngularAppGenerator(StoreGenerator):
              all_fields, out_names, pk_info, pk_field, pk_ts_type,
              has_post, has_put, has_del, has_detail,
              post_in_names, put_in_names,
-             fk_deps, rev_fk_deps) in resources:
+             fk_deps, rev_fk_deps,
+             optional_post_fields) in resources:
             self._write(
                 stores_dir / f'{schema_name}_{table_name}.store.ts',
                 _store(schema_name, table_name, base_path, iname,
@@ -1507,7 +1537,8 @@ class AngularAppGenerator(StoreGenerator):
              all_fields, out_names, pk_info, pk_field, pk_ts_type,
              has_post, has_put, has_del, has_detail,
              post_in_names, put_in_names,
-             fk_deps, rev_fk_deps) in resources:
+             fk_deps, rev_fk_deps,
+             optional_post_fields) in resources:
 
             res_dir = app_dir / 'pages' / schema_name / table_name
 
@@ -1518,7 +1549,7 @@ class AngularAppGenerator(StoreGenerator):
             if has_post:
                 self._write(res_dir / 'create.component.ts',
                             _create_component(schema_name, table_name, iname,
-                                              post_in_names, all_fields))
+                                              post_in_names, all_fields, optional_post_fields))
 
             if has_detail:
                 self._write(res_dir / 'detail.component.ts',
