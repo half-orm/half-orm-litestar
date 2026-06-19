@@ -1349,8 +1349,13 @@ class AngularAppGenerator(StoreGenerator):
             has_del    = 'DELETE' in crud_access and bool(pk_info)
             has_detail = 'GET'    in crud_access and bool(pk_info)
 
+            _non_pk = [f for f in all_names if f != pk_field and f not in api_excluded]
             post_in_names = _gen_in_fields(crud_access, 'POST', pk_field, api_excluded, all_names) if has_post else []
+            if has_post and not post_in_names:
+                post_in_names = _non_pk
             put_in_names  = _gen_in_fields(crud_access, 'PUT',  pk_field, api_excluded, all_names) if has_put  else []
+            if has_put and not put_in_names:
+                put_in_names = _non_pk
 
             fk_deps     = self._fk_deps(inst, out_names, detail_resources)
             rev_fk_deps = self._reverse_fk_deps(inst, pk_field, crud_resources)
