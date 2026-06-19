@@ -9,6 +9,7 @@ from pathlib import Path
 from half_orm_litestar.crud_routes import (
     _gen_out_fields,
     _gen_in_fields,
+    _pk_info,
     _simple_pk,
     _instance,
     _py_type_str,
@@ -22,6 +23,7 @@ class SvelteGenerator(StoreGenerator):
         if output_dir.exists():
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True)
+        self._write_base(output_dir)
         version_prefix = f'/v{api_version}' if api_version is not None else ''
 
         # Pass 1: collect resources that have CRUD_ACCESS
@@ -48,12 +50,18 @@ class SvelteGenerator(StoreGenerator):
             inst         = _instance(relation)
             all_fields   = getattr(inst, '_ho_fields', {})
             all_names    = list(all_fields.keys())
-            pk_info      = _simple_pk(relation)
-            pk_field     = pk_info[0] if pk_info else None
-            pk_ts_type   = (
-                self.ts_type(_py_type_str(list(inst._ho_pkey.values())[0].py_type))
-                if pk_info else None
-            )
+            pk_cols      = _pk_info(relation)
+            pk_info      = pk_cols  # truthy iff non-empty
+            if len(pk_cols) == 1:
+                pk_field    = pk_cols[0][0]
+                pk_ts_type  = self.ts_type(pk_cols[0][2])
+                pk_extractor = f'i => String(i.{pk_field})'
+            elif len(pk_cols) > 1:
+                pk_field    = pk_cols[0][0]
+                pk_ts_type  = 'string'
+                pk_extractor = 'i => [' + ', '.join(f'i.{f}' for f, _, _ in pk_cols) + '].map(String).join("::")'
+            else:
+                pk_field = pk_ts_type = pk_extractor = None
 
             iname     = self.interface_name(schema_name, table_name)
             rname     = self.resource_name(schema_name, table_name)
@@ -80,6 +88,7 @@ class SvelteGenerator(StoreGenerator):
             lines = []
 
             # Imports
+            lines.append("import { BaseState } from './base.svelte.ts';")
             lines.append("import { auth } from '$lib/auth.svelte.ts';")
             lines.append("import { registerClear } from '$lib/stateRegistry';")
             lines.append('')
@@ -106,34 +115,14 @@ class SvelteGenerator(StoreGenerator):
                 lines.append(self._interface(f'{iname}PutIn', put_in_names, all_fields))
 
             # State class
-            lines.append(f'class {iname}State {{')
-            if pk_field:
-                lines.append(f'    items = $state<{iname}Out[]>([]);')
-                lines.append(f'    byId  = $state(new Map<string, {iname}Out>());')
-                lines.append(f'')
-                lines.append(f'    clear() {{')
-                lines.append(f'        this.items = [];')
-                lines.append(f'        this.byId  = new Map();')
-                lines.append(f'    }}')
-                lines.append(f'    setItems(data: {iname}Out[]) {{')
-                lines.append(f'        this.items = data;')
-                lines.append(f'        this.byId  = new Map(data.map(i => [String(i.{pk_field}), i]));')
-                lines.append(f'    }}')
-                lines.append(f'    mergeItems(data: {iname}Out[]) {{')
-                lines.append(f'        data.forEach(i => this.byId.set(String(i.{pk_field}), i));')
-                lines.append(f'        this.items = data;')
-                lines.append(f'    }}')
-                lines.append(f'    setItem(item: {iname}Out) {{')
-                lines.append(f'        this.byId.set(String(item.{pk_field}), item);')
-                lines.append(f'        const idx = this.items.findIndex(i => i.{pk_field} === item.{pk_field});')
-                lines.append(f'        if (idx >= 0) this.items[idx] = item; else this.items.push(item);')
-                lines.append(f'    }}')
-                lines.append(f'    removeItem(id: string) {{')
-                lines.append(f'        this.byId.delete(id);')
-                lines.append(f'        this.items = this.items.filter(i => String(i.{pk_field}) !== id);')
-                lines.append(f'    }}')
+            if pk_info:
+                lines.append(f'class {iname}State extends BaseState<{iname}Out> {{')
+                lines.append(f'    constructor() {{ super({pk_extractor}); }}')
             else:
+                lines.append(f'class {iname}State {{')
                 lines.append(f'    items = $state<{iname}Out[]>([]);')
+                lines.append(f'    setItems(data: {iname}Out[]) {{ this.items = data; }}')
+                lines.append(f'    mergeItems(data: {iname}Out[]) {{ this.items = data; }}')
 
             if fk_deps:
                 lines.append('')
@@ -229,6 +218,35 @@ class SvelteGenerator(StoreGenerator):
 
         if stems:
             self._write_index(output_dir, stems, version_prefix)
+
+    def _write_base(self, output_dir: Path) -> None:
+        content = """\
+export class BaseState<V> {
+    byId  = $state(new Map<string, V>());
+    items = $derived([...this.byId.values()]);
+
+    constructor(private readonly pk: (item: V) => string) {}
+
+    clear() {
+        this.byId = new Map();
+    }
+    setItems(data: V[]) {
+        this.byId = new Map(data.map(i => [this.pk(i), i]));
+    }
+    mergeItems(data: V[]) {
+        data.forEach(i => this.byId.set(this.pk(i), i));
+    }
+    setItem(item: V) {
+        this.byId.set(this.pk(item), item);
+    }
+    removeItem(id: string) {
+        this.byId.delete(id);
+    }
+}
+"""
+        base_file = output_dir / 'base.svelte.ts'
+        base_file.write_text(content, encoding='utf-8')
+        print(f'  {base_file}')
 
     def _fk_deps(self, inst, out_names: list, crud_resources: set) -> list:
         """Return (local_field, remote_schema, remote_table, remote_pk) for each

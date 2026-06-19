@@ -42,16 +42,19 @@ def _instance(relation):
     return relation()
 
 
-def _simple_pk(relation) -> Tuple[str, str, str] | None:
-    """Return (pk_field_name, litestar_path_type, py_type_str) for single-column PKs.
-
-    _ho_pkey is an instance attribute, so we must instantiate the relation.
+def _pk_info(relation) -> list[tuple[str, str, str]]:
+    """Return [(field_name, litestar_path_type, py_type_str), ...] for all PK columns.
+    Returns [] for relations with no PK (views, etc.).
     """
     pkey = getattr(_instance(relation), '_ho_pkey', {})
-    if len(pkey) != 1:
-        return None
-    field_name, field_obj = next(iter(pkey.items()))
-    return field_name, _path_type_str(field_obj.py_type), _py_type_str(field_obj.py_type)
+    return [(name, _path_type_str(obj.py_type), _py_type_str(obj.py_type))
+            for name, obj in pkey.items()]
+
+
+def _simple_pk(relation) -> Tuple[str, str, str] | None:
+    """Return (pk_field_name, litestar_path_type, py_type_str) for single-column PKs only."""
+    cols = _pk_info(relation)
+    return cols[0] if len(cols) == 1 else None
 
 
 def _filter_params_str(all_fields: dict) -> Tuple[str, str]:
@@ -294,7 +297,22 @@ def generate_crud_routes(
         base_path    = f'{version_prefix}/{schema_name}/{table_name}'
         resource     = f'{schema_name}/{table_name}'
         handler_prefix = f'_crud_{module_alias}'
-        pk_info      = _simple_pk(relation)
+        pk_cols      = _pk_info(relation)
+        pk_info      = pk_cols  # truthy iff non-empty
+
+        if len(pk_cols) == 1:
+            pk_field, pk_path_type, pk_py_type = pk_cols[0]
+            pk_instance_filter  = f'{pk_field}=id'
+            pk_broadcast_expr   = f'result.get("{pk_field}")'
+        elif len(pk_cols) > 1:
+            pk_field  = pk_cols[0][0]   # first field; used in WS cascade map
+            pk_path_type = 'str'
+            pk_py_type   = 'str'
+            _pk_names = [f for f, _, _ in pk_cols]
+            pk_instance_filter = f"**dict(zip({_pk_names!r}, id.split('::')))"
+            pk_broadcast_expr  = f"'::'.join(str(result.get(f, '')) for f in {_pk_names!r})"
+        else:
+            pk_field = pk_path_type = pk_py_type = pk_instance_filter = pk_broadcast_expr = None
 
         instance     = _instance(relation)
         all_fields   = getattr(instance, '_ho_fields', {})
@@ -333,12 +351,11 @@ def generate_crud_routes(
 
         # GET /{pk}
         if pk_info and (module_str, 'GET') not in covered and 'GET' in crud_access:
-            pk_field, pk_path_type, pk_py_type = pk_info
             handler_name = f'{handler_prefix}_get'
             handler_blocks.append(templates.CRUD_GET_ONE.format(
                 path=base_path,
                 handler_name=handler_prefix,
-                pk_field=pk_field,
+                pk_instance_filter=pk_instance_filter,
                 pk_path_type=pk_path_type,
                 pk_py_type=pk_py_type,
                 module_alias=module_alias,
@@ -350,8 +367,6 @@ def generate_crud_routes(
 
         # Write verbs — tables only
         if is_table and pk_info:
-            pk_field, pk_path_type, pk_py_type = pk_info
-
             if (module_str, 'POST') not in covered and 'POST' in crud_access:
                 post_in_class = f'_In_{module_alias}_post'
                 post_in_names = _gen_in_fields(crud_access, 'POST', pk_field, api_excluded, all_names)
@@ -366,7 +381,7 @@ def generate_crud_routes(
                     out_typedict=out_class,
                     access_description=_access_description(crud_access, 'POST'),
                     resource=resource,
-                    pk_field=pk_field,
+                    pk_broadcast_expr=pk_broadcast_expr,
                 ))
                 route_handlers.append(handler_name)
 
@@ -378,7 +393,7 @@ def generate_crud_routes(
                 handler_blocks.append(templates.CRUD_PUT.format(
                     path=base_path,
                     handler_name=handler_prefix,
-                    pk_field=pk_field,
+                    pk_instance_filter=pk_instance_filter,
                     pk_path_type=pk_path_type,
                     pk_py_type=pk_py_type,
                     module_alias=module_alias,
@@ -395,7 +410,7 @@ def generate_crud_routes(
                 handler_blocks.append(templates.CRUD_DELETE.format(
                     path=base_path,
                     handler_name=handler_prefix,
-                    pk_field=pk_field,
+                    pk_instance_filter=pk_instance_filter,
                     pk_path_type=pk_path_type,
                     pk_py_type=pk_py_type,
                     module_alias=module_alias,
@@ -418,8 +433,8 @@ def generate_crud_routes(
         if 'GET' in crud_access and (module_str, 'GET') not in covered:
             ho_dev_entry['GET'] = {'out': out_all}
         if is_table and pk_info:
-            _pk = pk_info[0]
-            in_all = [f for f in all_names if f not in api_excluded and f != _pk]
+            _pk_names_set = {f for f, _, _ in pk_cols}
+            in_all = [f for f in all_names if f not in api_excluded and f not in _pk_names_set]
             if 'POST' in crud_access and (module_str, 'POST') not in covered:
                 ho_dev_entry['POST'] = {'in': in_all, 'out': out_all}
             if 'PUT' in crud_access and (module_str, 'PUT') not in covered:

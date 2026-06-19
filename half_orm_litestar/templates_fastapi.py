@@ -171,7 +171,7 @@ async def {handler_name}_get(
     roles = _get_roles(request)
     role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
     authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)
-    rows = await {module_alias}.{class_name}({pk_field}=id, **role_filter).ho_aselect(*authorized)
+    rows = await {module_alias}.{class_name}({pk_instance_filter}, **role_filter).ho_aselect(*authorized)
     if not rows:
         raise HTTPException(status_code=404)
     return rows[0]
@@ -187,7 +187,7 @@ async def {handler_name}_create(
     in_fields = _effective_in_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "POST", _get_roles(request), api_excluded)
     payload = {{k: v for k, v in data.model_dump(exclude_none=True).items() if not in_fields or k in in_fields}}
     result = await {module_alias}.{class_name}(**payload).ho_ainsert()
-    await _manager.broadcast({{"event": "create", "resource": "{resource}", "id": result.get("{pk_field}")}})
+    await _manager.broadcast({{"event": "create", "resource": "{resource}", "id": {pk_broadcast_expr}}})
     return result
 """
 
@@ -202,7 +202,7 @@ async def {handler_name}_update(
     in_fields = _effective_in_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "PUT", _get_roles(request), api_excluded)
     payload = {{k: v for k, v in data.model_dump(exclude_none=True).items() if not in_fields or k in in_fields}}
     authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "PUT", _get_roles(request), api_excluded)
-    result = await {module_alias}.{class_name}({pk_field}=id).ho_aupdate(*(authorized or ['*']), **payload)
+    result = await {module_alias}.{class_name}({pk_instance_filter}).ho_aupdate(*(authorized or ['*']), **payload)
     if not result:
         raise HTTPException(status_code=404)
     await _manager.broadcast({{"event": "update", "resource": "{resource}", "id": id}})
@@ -216,9 +216,9 @@ async def {handler_name}_delete(
     id: {pk_py_type},
 ) -> None:
     await _ws_broadcast_cascade(
-        {module_alias}.{class_name}({pk_field}=id), "{resource}", id
+        {module_alias}.{class_name}({pk_instance_filter}), "{resource}", id
     )
-    result = await {module_alias}.{class_name}({pk_field}=id).ho_adelete('*')
+    result = await {module_alias}.{class_name}({pk_instance_filter}).ho_adelete('*')
     if not result:
         raise HTTPException(status_code=404)
     await _manager.broadcast({{"event": "delete", "resource": "{resource}", "id": id}})

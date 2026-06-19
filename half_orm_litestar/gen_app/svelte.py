@@ -12,6 +12,7 @@ from pathlib import Path
 from half_orm_litestar.crud_routes import (
     _gen_out_fields,
     _gen_in_fields,
+    _pk_info,
     _simple_pk,
     _instance,
     _py_type_str,
@@ -401,12 +402,18 @@ def _rname(schema_name: str, table_name: str) -> str:
 def _list_component(
     schema_name: str, table_name: str,
     stem: str, rname: str, iname: str,
-    out_names: list, pk_info,
+    out_names: list, pk_info: list,
     has_post: bool, has_del: bool,
     map_key: str,
     fk_deps: list,
 ) -> str:
-    pk_field = pk_info[0] if pk_info else None
+    pk_field = pk_info[0][0] if pk_info else None
+    if len(pk_info) == 1:
+        pk_item_expr = f'item.{pk_field}'
+    elif len(pk_info) > 1:
+        pk_item_expr = '[' + ', '.join(f'item.{f}' for f, _, _ in pk_info) + '].map(String).join("::")'
+    else:
+        pk_item_expr = None
     title    = _title(schema_name, table_name)
     fk_map   = {local: (rs, rt) for local, rs, rt, _ in fk_deps}
 
@@ -433,7 +440,7 @@ def _list_component(
     if pk_field:
         tr_open = (
             f'<tr class="border-t hover:bg-gray-50 cursor-pointer"'
-            f' onclick={{() => goto(`/{schema_name}/{table_name}/${{item.{pk_field}}}`)}}'
+            f' onclick={{() => goto(`/{schema_name}/{table_name}/${{{pk_item_expr}}}`)}}'
             f'>'
         )
     else:
@@ -445,7 +452,7 @@ def _list_component(
             f'<td class="px-4 py-2 text-right">\n'
             f'          {{#if canDelete}}\n'
             f'            <button'
-            f' onclick={{(e) => {{ e.stopPropagation(); handleDelete(item.{pk_field}); }}}}'
+            f' onclick={{(e) => {{ e.stopPropagation(); handleDelete({pk_item_expr}); }}}}'
             f'\n                    class="text-red-600 hover:underline text-sm">Delete</button>\n'
             f'          {{/if}}\n'
             f'        </td>'
@@ -482,13 +489,16 @@ def _list_component(
   let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
 
   const hasFilters = $derived(Object.keys(filters).length > 0);
-
+{"" if not pk_field else f"""
   const displayItems = $derived(
     hasFilters && auth.fetchedRoutes.has({rname}Api.listUrl({{}}))
       ? Array.from({rname}State.byId.values()).filter(item =>
             Object.entries(filters).every(([k, v]) => String((item as any)[k]) === String(v)))
       : {rname}State.items
   );
+""".rstrip()}{"" if pk_field else f"""
+  const displayItems = $derived({rname}State.items);
+""".rstrip()}
 
   $effect(() => {{
     const url = {rname}Api.listUrl(filters);
@@ -500,7 +510,7 @@ def _list_component(
       }});
     }}
   }});
-
+{"" if not pk_field else f"""
   $effect(() => {{
     const ev = auth.lastEvent;
     if (!ev || ev.resource !== '{map_key}') return;
@@ -512,6 +522,7 @@ def _list_component(
         .then(d => {{ if (d) {rname}State.setItem(d); }}));
     }}
   }});
+""".rstrip()}
 {can_create}{can_delete}{delete_fn}
 </script>
 
@@ -959,8 +970,9 @@ class SvelteAppGenerator(StoreGenerator):
             inst         = _instance(relation)
             all_fields   = getattr(inst, '_ho_fields', {})
             all_names    = list(all_fields.keys())
-            pk_info      = _simple_pk(relation)
-            pk_field     = pk_info[0] if pk_info else None
+            pk_cols      = _pk_info(relation)
+            pk_info      = pk_cols
+            pk_field     = pk_cols[0][0] if pk_cols else None
             iname        = self.interface_name(schema_name, table_name)
             rname        = self.resource_name(schema_name, table_name)
             stem         = f'{schema_name}_{table_name}'
