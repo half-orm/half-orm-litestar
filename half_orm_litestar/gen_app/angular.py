@@ -775,7 +775,7 @@ def _list_component(
                 f' class="text-blue-500 hover:underline font-mono text-xs">{{{{ item.{f} }}}}</a>'
                 f'</td>'
             )
-        return f'<td class="px-4 py-2 text-sm">{{{{ item.{f} ?? \'\' }}}}</td>'
+        return f'<td class="px-4 py-2 text-sm">{{{{ item.{f} }}}}</td>'
 
     td_cols = '\n              '.join(_td(f) for f in out_names)
 
@@ -830,9 +830,7 @@ def _list_component(
         if pk_field else ''
     )
 
-    imports_list = "RouterLink, NgFor"
-    if pk_field:
-        imports_list = "RouterLink"
+    needs_router_link = has_post or bool(fk_deps)
 
     if pk_field:
         display_items_filter = (
@@ -847,12 +845,14 @@ def _list_component(
             '      )'
         )
 
+    router_link_es  = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
+    router_link_imp = 'RouterLink' if needs_router_link else ''
+
     return f"""\
 import {{ Component, computed, effect, inject, Input, untracked }} from '@angular/core';
 import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
-import {{ RouterLink }} from '@angular/router';
-import {{ Router }} from '@angular/router';
+{router_link_es}import {{ Router }} from '@angular/router';
 import {{ {iname}Store }} from '../../../stores/{schema_name}_{table_name}.store';
 import type {{ {iname}Out }} from '../../../stores/{schema_name}_{table_name}.store';
 import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
@@ -860,7 +860,7 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
 @Component({{
   selector: '{_selector(schema_name, table_name, 'list')}',
   standalone: true,
-  imports: [RouterLink],
+  imports: [{router_link_imp}],
   template: `
     @if (!embedded) {{
       <div class="flex justify-between items-center mb-4">
@@ -1097,9 +1097,9 @@ def _detail_component(
       </div>
     }}"""
 
-    # FK reference sections
+    # FK reference sections (only unique deps — self-refs excluded from injects)
     fk_sections = ''
-    for lf, rs, rt, remote_pk in fk_deps:
+    for lf, rs, rt, remote_pk in _unique_fk_deps:
         rn_store = f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
         rt_title = _title(rs, rt)
         cn = _cname(rs, rt)
@@ -1160,7 +1160,7 @@ def _detail_component(
     )
 
     fk_fetch_effects = ''
-    for lf, rs, rt, remote_pk in fk_deps:
+    for lf, rs, rt, remote_pk in _unique_fk_deps:
         rn_store = f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
         fk_fetch_effects += (
             f'\n    effect(() => {{\n'
@@ -1327,6 +1327,16 @@ class AngularAppGenerator(StoreGenerator):
             crud_resources_map[(schema_name, table_name)] = getattr(mod, 'CRUD_ACCESS', {})
             raw.append((relation, mod))
 
+        # Pre-pass: compute detail_resources before Pass 2 (needed for FK link filtering)
+        detail_resources: set[tuple[str, str]] = set()
+        for relation, mod in raw:
+            ca = getattr(mod, 'CRUD_ACCESS', None) or {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
+            if _simple_pk(relation) and 'GET' in ca:
+                detail_resources.add((
+                    relation._schemaname.replace('.', '_'),
+                    relation.__name__.lower(),
+                ))
+
         # Pass 2 — per-resource metadata
         resources = []
         for relation, mod in raw:
@@ -1351,14 +1361,15 @@ class AngularAppGenerator(StoreGenerator):
             if not out_names:
                 out_names = [f for f in all_names if f not in api_excluded]
 
-            has_post = 'POST'   in crud_access and bool(pk_info)
-            has_put  = 'PUT'    in crud_access and bool(pk_info)
-            has_del  = 'DELETE' in crud_access and bool(pk_info)
+            has_post   = 'POST'   in crud_access and bool(pk_info)
+            has_put    = 'PUT'    in crud_access and bool(pk_info)
+            has_del    = 'DELETE' in crud_access and bool(pk_info)
+            has_detail = 'GET'    in crud_access and bool(pk_info)
 
             post_in_names = _gen_in_fields(crud_access, 'POST', pk_field, api_excluded, all_names) if has_post else []
             put_in_names  = _gen_in_fields(crud_access, 'PUT',  pk_field, api_excluded, all_names) if has_put  else []
 
-            fk_deps     = self._fk_deps(inst, out_names, crud_resources)
+            fk_deps     = self._fk_deps(inst, out_names, detail_resources)
             rev_fk_deps = self._reverse_fk_deps(inst, pk_field, crud_resources)
 
             base_path = f'{version_prefix}/{schema_name}/{table_name}'
@@ -1366,7 +1377,7 @@ class AngularAppGenerator(StoreGenerator):
             resources.append((
                 schema_name, table_name, map_key, iname, base_path,
                 all_fields, out_names, pk_info, pk_field, pk_ts_type,
-                has_post, has_put, has_del,
+                has_post, has_put, has_del, has_detail,
                 post_in_names, put_in_names,
                 fk_deps, rev_fk_deps,
             ))
@@ -1375,7 +1386,7 @@ class AngularAppGenerator(StoreGenerator):
         stores_dir = app_dir / 'stores'
         for (schema_name, table_name, map_key, iname, base_path,
              all_fields, out_names, pk_info, pk_field, pk_ts_type,
-             has_post, has_put, has_del,
+             has_post, has_put, has_del, has_detail,
              post_in_names, put_in_names,
              fk_deps, rev_fk_deps) in resources:
             self._write(
@@ -1387,8 +1398,7 @@ class AngularAppGenerator(StoreGenerator):
 
         # --- app routes + app component ---
         route_meta = [
-            (r[0], r[1], r[2], r[10], r[11],
-             bool(r[7]) and 'GET' in crud_resources_map.get((r[0], r[1]), {}))
+            (r[0], r[1], r[2], r[10], r[11], r[13])  # sn, tn, mk, has_post, has_put, has_detail
             for r in resources
         ]
         first_route = f'/{resources[0][0]}/{resources[0][1]}' if resources else '/access'
@@ -1406,7 +1416,7 @@ class AngularAppGenerator(StoreGenerator):
         # --- per-resource pages ---
         for (schema_name, table_name, map_key, iname, base_path,
              all_fields, out_names, pk_info, pk_field, pk_ts_type,
-             has_post, has_put, has_del,
+             has_post, has_put, has_del, has_detail,
              post_in_names, put_in_names,
              fk_deps, rev_fk_deps) in resources:
 
@@ -1421,7 +1431,7 @@ class AngularAppGenerator(StoreGenerator):
                             _create_component(schema_name, table_name, iname,
                                               post_in_names, all_fields))
 
-            if pk_info and 'GET' in crud_resources_map.get((schema_name, table_name), {}):
+            if has_detail:
                 self._write(res_dir / 'detail.component.ts',
                             _detail_component(schema_name, table_name, iname,
                                               pk_field, pk_ts_type,
