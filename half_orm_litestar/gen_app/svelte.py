@@ -689,6 +689,41 @@ def _list_page(stem: str) -> str:
 """
 
 
+def _is_bool_field(f: str, all_fields: dict) -> bool:
+    return f in all_fields and _py_type_str(all_fields[f].py_type) == 'bool'
+
+
+def _is_text_field(f: str, all_fields: dict) -> bool:
+    return f in all_fields and _py_type_str(all_fields[f].py_type) == 'str'
+
+
+def _text_fields_js(field_names: list, all_fields: dict) -> str:
+    text = [f for f in field_names if _is_text_field(f, all_fields)]
+    return ', '.join(f"'{f}'" for f in text)
+
+
+def _null_map_js(text_fields_var: str = 'textFields') -> str:
+    return f'.map(([k, v]) => [k, !{text_fields_var}.has(k) && v === \'\' ? null : v] as [string, unknown])'
+
+
+def _svelte_form_field(f: str, all_fields: dict, bind_prefix: str = 'form') -> str:
+    if _is_bool_field(f, all_fields):
+        return (
+            f'<div class="flex items-center gap-2">\n'
+            f'      <input id="f_{f}" type="checkbox" bind:checked={{{bind_prefix}.{f}}}\n'
+            f'             class="h-4 w-4 rounded border-gray-300" />\n'
+            f'      <label for="f_{f}" class="text-sm font-medium text-gray-700">{f}</label>\n'
+            f'    </div>'
+        )
+    return (
+        f'<div>\n'
+        f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
+        f'      <input id="f_{f}" bind:value={{{bind_prefix}.{f}}}\n'
+        f'             class="w-full border rounded px-3 py-2 text-sm" />\n'
+        f'    </div>'
+    )
+
+
 def _new_page(
     schema_name: str, table_name: str,
     stem: str, rname: str, iname: str,
@@ -696,14 +731,14 @@ def _new_page(
     optional_post_fields: frozenset = frozenset(),
 ) -> str:
     title = _title(schema_name, table_name)
-    fields_init = ', '.join(f'{f}: ""' for f in post_in_names)
+    fields_init = ', '.join(
+        f'{f}: false' if _is_bool_field(f, all_fields) else f'{f}: ""'
+        for f in post_in_names
+    )
     optional_set_js = ', '.join(f"'{f}'" for f in optional_post_fields)
+    text_fields_js  = _text_fields_js(post_in_names, all_fields)
     form_fields = '\n    '.join(
-        f'<div>\n'
-        f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
-        f'      <input id="f_{f}" bind:value={{form.{f}}}\n'
-        f'             class="w-full border rounded px-3 py-2 text-sm" />\n'
-        f'    </div>'
+        _svelte_form_field(f, all_fields)
         for f in post_in_names
     )
     return f"""\
@@ -716,6 +751,7 @@ def _new_page(
   let error = $state('');
 
   const optionalFields = new Set([{optional_set_js}]);
+  const textFields = new Set([{text_fields_js}]);
 
   async function handleSubmit(e: Event) {{
     e.preventDefault();
@@ -723,6 +759,7 @@ def _new_page(
       const payload = Object.fromEntries(
         Object.entries(form as unknown as Record<string, unknown>)
           .filter(([k, v]) => !optionalFields.has(k) || v !== '')
+          {_null_map_js()}
       ) as unknown as {iname}PostIn;
       const res = await {rname}Api.create(payload);
       if (!res.ok) throw new Error(await res.text());
@@ -783,11 +820,7 @@ def _detail_page(
 
     # Edit form fields
     form_fields = '\n    '.join(
-        f'<div>\n'
-        f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
-        f'      <input id="f_{f}" bind:value={{form.{f}}}\n'
-        f'             class="w-full border rounded px-3 py-2 text-sm" />\n'
-        f'    </div>'
+        _svelte_form_field(f, all_fields)
         for f in put_in_names
     ) if put_in_names else ''
 
@@ -797,12 +830,21 @@ def _detail_page(
     edit_section = ''
 
     if has_put and put_in_names:
-        empty_init  = ', '.join(f'{f}: ""' for f in put_in_names)
-        effect_body = '\n        '.join(f'form.{f} = (item.{f} as string) ?? "";' for f in put_in_names)
+        empty_init  = ', '.join(
+            f'{f}: false' if _is_bool_field(f, all_fields) else f'{f}: ""'
+            for f in put_in_names
+        )
+        effect_body = '\n        '.join(
+            f'form.{f} = Boolean(item.{f});' if _is_bool_field(f, all_fields)
+            else f'form.{f} = (item.{f} as string) ?? "";'
+            for f in put_in_names
+        )
+        put_text_fields_js = _text_fields_js(put_in_names, all_fields)
         extra_script = (
             f'\n  let editing = $state(false);\n'
             f'  let form = $state({{ {empty_init} }});\n'
             f'  let error = $state(\'\');\n'
+            f'  const putTextFields = new Set([{put_text_fields_js}]);\n'
             f'  $effect(() => {{\n'
             f'    if (item) {{\n'
             f'        {effect_body}\n'
@@ -811,7 +853,11 @@ def _detail_page(
             f'\n  async function handleUpdate(e: Event) {{\n'
             f'    e.preventDefault();\n'
             f'    try {{\n'
-            f'      const res = await {rname}Api.update(page.params.id, form);\n'
+            f'      const putPayload = Object.fromEntries(\n'
+            f'        Object.entries(form as unknown as Record<string, unknown>)\n'
+            f'          {_null_map_js("putTextFields")}\n'
+            f'      ) as unknown as {iname}PutIn;\n'
+            f'      const res = await {rname}Api.update(page.params.id, putPayload);\n'
             f'      if (!res.ok) throw new Error(await res.text());\n'
             f'      const updated = await res.json();\n'
             f'      {rname}State.setItem(updated);\n'

@@ -1022,6 +1022,37 @@ export class {iname}ListComponent {{
 """
 
 
+def _is_bool_field(f: str, all_fields: dict) -> bool:
+    return f in all_fields and _py_type_str(all_fields[f].py_type) == 'bool'
+
+
+def _is_text_field(f: str, all_fields: dict) -> bool:
+    return f in all_fields and _py_type_str(all_fields[f].py_type) == 'str'
+
+
+def _text_fields_ts(field_names: list, all_fields: dict) -> str:
+    text = [f for f in field_names if _is_text_field(f, all_fields)]
+    return ', '.join(repr(f) for f in text)
+
+
+def _ng_form_field(f: str, all_fields: dict) -> str:
+    if _is_bool_field(f, all_fields):
+        return (
+            f'<div class="flex items-center gap-2">\n'
+            f'        <input type="checkbox" [(ngModel)]="form.{f}" name="{f}"\n'
+            f'               class="h-4 w-4 rounded border-gray-300" />\n'
+            f'        <label class="text-sm font-medium text-gray-700">{f}</label>\n'
+            f'      </div>'
+        )
+    return (
+        f'<div>\n'
+        f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
+        f'        <input [(ngModel)]="form.{f}" name="{f}"\n'
+        f'               class="w-full border rounded px-3 py-2 text-sm" />\n'
+        f'      </div>'
+    )
+
+
 def _create_component(
     schema_name: str, table_name: str,
     iname: str,
@@ -1029,14 +1060,13 @@ def _create_component(
     optional_post_fields: frozenset = frozenset(),
 ) -> str:
     title = _title(schema_name, table_name)
-    fields_ts = ', '.join(f'{f}: \'\'  as any' for f in post_in_names)
+    fields_ts = ', '.join(
+        f'{f}: false  as any' if _is_bool_field(f, all_fields) else f'{f}: \'\'  as any'
+        for f in post_in_names
+    )
 
     form_fields = '\n      '.join(
-        f'<div>\n'
-        f'        <label class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
-        f'        <input [(ngModel)]="form.{f}" name="{f}"\n'
-        f'               class="w-full border rounded px-3 py-2 text-sm" />\n'
-        f'      </div>'
+        _ng_form_field(f, all_fields)
         for f in post_in_names
     )
 
@@ -1044,17 +1074,21 @@ def _create_component(
         f"  private readonly optionalFields = new Set([{', '.join(repr(f) for f in sorted(optional_post_fields))}]);\n"
         if optional_post_fields else ''
     )
+    text_fields_ts  = _text_fields_ts(post_in_names, all_fields)
+    null_map = "        .map(([k, v]): [string, unknown] => [k, !textFields.has(k) && v === '' ? null : v])\n"
 
-    if optional_post_fields:
-        submit_body = (
-            "    const payload = Object.fromEntries(\n"
-            "      Object.entries(this.form as unknown as Record<string, unknown>)\n"
+    submit_body = (
+        f"    const textFields = new Set([{text_fields_ts}]);\n"
+        "    const payload = Object.fromEntries(\n"
+        "      Object.entries(this.form as unknown as Record<string, unknown>)\n"
+        + (
             "        .filter(([k, v]) => !this.optionalFields.has(k) || v !== '')\n"
-            f"    ) as unknown as {iname}PostIn;\n"
-            "    this.store.create(payload).subscribe({"
+            if optional_post_fields else ""
         )
-    else:
-        submit_body = "    this.store.create(this.form).subscribe({"
+        + null_map
+        + f"    ) as unknown as {iname}PostIn;\n"
+        "    this.store.create(payload).subscribe({"
+    )
 
     return f"""\
 import {{ Component, inject, signal }} from '@angular/core';
@@ -1180,14 +1214,13 @@ def _detail_component(
 
     if has_put and put_in_names:
         form_fields_tmpl = '\n        '.join(
-            f'<div>\n'
-            f'          <label class="block text-sm font-medium text-gray-700 mb-1">{f}</label>\n'
-            f'          <input [(ngModel)]="form.{f}" name="{f}"\n'
-            f'                 class="w-full border rounded px-3 py-2 text-sm" />\n'
-            f'        </div>'
+            _ng_form_field(f, all_fields).replace('\n        ', '\n          ')
             for f in put_in_names
         )
-        form_init = ', '.join(f'{f}: \'\' as any' for f in put_in_names)
+        form_init = ', '.join(
+            f'{f}: false as any' if _is_bool_field(f, all_fields) else f'{f}: \'\' as any'
+            for f in put_in_names
+        )
         form_class = f'  form: any = {{ {form_init} }};'
         can_edit_field = f"\n  readonly canEdit = computed(() => !!this.auth.access()['{map_key}']?.PUT);"
         edit_btn_tmpl = (
@@ -1198,7 +1231,11 @@ def _detail_component(
             '          </button>\n'
             '        }'
         )
-        effect_body = ' '.join(f'this.form.{f} = (i as any).{f} ?? \'\';' for f in put_in_names)
+        effect_body = ' '.join(
+            f'this.form.{f} = Boolean((i as any).{f});' if _is_bool_field(f, all_fields)
+            else f'this.form.{f} = (i as any).{f} ?? \'\';'
+            for f in put_in_names
+        )
         form_effect = (
             f'\n    effect(() => {{ const i = this.item(); if (i) {{ {effect_body} }} }}, {{ allowSignalWrites: true }});'
         )
@@ -1273,9 +1310,15 @@ def _detail_component(
 
     handle_update = ''
     if has_put and put_in_names:
+        put_text_fields_ts = _text_fields_ts(put_in_names, all_fields)
         handle_update = (
             f'\n  handleUpdate(): void {{\n'
-            f'    this.store.update(this.id as any, this.form).subscribe({{\n'
+            f"    const textFields = new Set([{put_text_fields_ts}]);\n"
+            f'    const putPayload = Object.fromEntries(\n'
+            f'      Object.entries(this.form as unknown as Record<string, unknown>)\n'
+            f'        .map(([k, v]): [string, unknown] => [k, !textFields.has(k) && v === \'\' ? null : v])\n'
+            f'    ) as unknown as {iname}PutIn;\n'
+            f'    this.store.update(this.id as any, putPayload).subscribe({{\n'
             f'      next: (updated) => {{\n'
             f'        this.store.setItem(updated); this.item.set(updated); this.editing.set(false);\n'
             f'      }},\n'
