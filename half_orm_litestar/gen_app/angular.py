@@ -1157,7 +1157,7 @@ def _detail_component(
     if has_put and put_in_names:
         handle_update = (
             f'\n  handleUpdate(): void {{\n'
-            f'    this.store.update(this.id, this.form).subscribe({{\n'
+            f'    this.store.update(this.id as any, this.form).subscribe({{\n'
             f'      next: (updated) => {{\n'
             f'        this.store.setItem(updated); this.item.set(updated); this.editing.set(false);\n'
             f'      }},\n'
