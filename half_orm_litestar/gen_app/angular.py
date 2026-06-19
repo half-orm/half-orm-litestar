@@ -1097,12 +1097,12 @@ def _detail_component(
       </div>
     }}"""
 
-    # FK reference sections (only unique deps — self-refs excluded from injects)
+    # FK reference sections — all deps; self-refs reuse this.store (already injected)
     fk_sections = ''
-    for lf, rs, rt, remote_pk in _unique_fk_deps:
-        rn_store = f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
+    for lf, rs, rt, remote_pk in fk_deps:
+        is_self  = (rs == schema_name and rt == table_name)
+        rn_store = 'store' if is_self else f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
         rt_title = _title(rs, rt)
-        cn = _cname(rs, rt)
         fk_sections += f"""
     @if (item()?.{lf}) {{
       <div class="max-w-2xl mx-auto mt-4 p-6 bg-white rounded-lg shadow">
@@ -1160,8 +1160,9 @@ def _detail_component(
     )
 
     fk_fetch_effects = ''
-    for lf, rs, rt, remote_pk in _unique_fk_deps:
-        rn_store = f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
+    for lf, rs, rt, remote_pk in fk_deps:
+        is_self  = (rs == schema_name and rt == table_name)
+        rn_store = 'store' if is_self else f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
         fk_fetch_effects += (
             f'\n    effect(() => {{\n'
             f'      const v = this.item()?.{lf};\n'
