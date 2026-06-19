@@ -37,8 +37,8 @@ class SvelteGenerator(StoreGenerator):
             except ImportError:
                 continue
             crud_access = getattr(mod, 'CRUD_ACCESS', None) or {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
-            schema_name = relation._schemaname.replace('.', '_')
-            table_name  = relation.__name__.lower()
+            schema_name = relation._t_fqrn[1]
+            table_name  = relation._t_fqrn[2]
             crud_resources.add((schema_name, table_name))
             resources.append((relation, mod, crud_access, schema_name, table_name))
 

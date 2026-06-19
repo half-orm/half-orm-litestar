@@ -292,8 +292,8 @@ def generate_crud_routes(
         api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', [])
         kind         = getattr(relation, '_ho_kind', 'Table')
         is_table     = kind == 'Table'
-        schema_name  = relation._schemaname.replace('.', '_')
-        table_name   = relation.__name__.lower()
+        schema_name  = relation._t_fqrn[1]
+        table_name   = relation._t_fqrn[2]
         base_path    = f'{version_prefix}/{schema_name}/{table_name}'
         resource     = f'{schema_name}/{table_name}'
         handler_prefix = f'_crud_{module_alias}'

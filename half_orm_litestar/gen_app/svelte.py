@@ -509,7 +509,7 @@ def _list_component(
     const url = {rname}Api.listUrl(filters);
     if (!auth.fetchedRoutes.has(url)) {{
       const filtered = hasFilters;
-      {rname}Api.list(filters).then(r => r.json()).then(d => {{
+      {rname}Api.list(filters).then(r => r.ok ? r.json() : []).then(d => {{
         if (filtered) {rname}State.mergeItems(d);
         else {rname}State.setItems(d);
       }});
@@ -937,8 +937,8 @@ class SvelteAppGenerator(StoreGenerator):
                 mod = importlib.import_module(module_str)
             except ImportError:
                 continue
-            schema_name = relation._schemaname.replace('.', '_')
-            table_name  = relation.__name__.lower()
+            schema_name = relation._t_fqrn[1]
+            table_name  = relation._t_fqrn[2]
             crud_resources.add((schema_name, table_name))
             raw.append((relation, mod))
 
@@ -947,8 +947,8 @@ class SvelteAppGenerator(StoreGenerator):
         for relation, mod in raw:
             crud_access  = getattr(mod, 'CRUD_ACCESS', None) or {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
             api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', [])
-            schema_name  = relation._schemaname.replace('.', '_')
-            table_name   = relation.__name__.lower()
+            schema_name  = relation._t_fqrn[1]
+            table_name   = relation._t_fqrn[2]
             inst         = _instance(relation)
             all_fields   = getattr(inst, '_ho_fields', {})
             all_names    = list(all_fields.keys())

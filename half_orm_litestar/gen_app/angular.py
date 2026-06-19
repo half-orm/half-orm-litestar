@@ -1304,8 +1304,8 @@ class AngularAppGenerator(StoreGenerator):
                 mod = importlib.import_module(module_str)
             except ImportError:
                 continue
-            schema_name = relation._schemaname.replace('.', '_')
-            table_name  = relation.__name__.lower()
+            schema_name = relation._t_fqrn[1]
+            table_name  = relation._t_fqrn[2]
             crud_resources.add((schema_name, table_name))
             crud_resources_map[(schema_name, table_name)] = getattr(mod, 'CRUD_ACCESS', {})
             raw.append((relation, mod))
@@ -1316,8 +1316,8 @@ class AngularAppGenerator(StoreGenerator):
             ca = getattr(mod, 'CRUD_ACCESS', None) or {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
             if _simple_pk(relation) and 'GET' in ca:
                 detail_resources.add((
-                    relation._schemaname.replace('.', '_'),
-                    relation.__name__.lower(),
+                    relation._t_fqrn[1],
+                    relation._t_fqrn[2],
                 ))
 
         # Pass 2 — per-resource metadata
@@ -1325,8 +1325,8 @@ class AngularAppGenerator(StoreGenerator):
         for relation, mod in raw:
             crud_access  = getattr(mod, 'CRUD_ACCESS', None) or {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
             api_excluded = getattr(mod, 'API_EXCLUDED_FIELDS', [])
-            schema_name  = relation._schemaname.replace('.', '_')
-            table_name   = relation.__name__.lower()
+            schema_name  = relation._t_fqrn[1]
+            table_name   = relation._t_fqrn[2]
             inst         = _instance(relation)
             all_fields   = getattr(inst, '_ho_fields', {})
             all_names    = list(all_fields.keys())

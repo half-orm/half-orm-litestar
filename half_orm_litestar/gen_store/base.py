@@ -59,10 +59,11 @@ class StoreGenerator(ABC):
 
     def _reverse_fk_deps(self, inst, pk_field: str | None, crud_resources: set) -> list:
         """Return (remote_schema, remote_table, fk_field) for each simple reverse FK
-        whose remote table is in crud_resources."""
+        whose remote table is in crud_resources. Deduplicated by remote table."""
         if not pk_field:
             return []
         deps = []
+        seen: set[tuple[str, str]] = set()
         for fk in getattr(inst, '_ho_fkeys', {}).values():
             if not fk.is_reverse:
                 continue
@@ -77,6 +78,9 @@ class StoreGenerator(ABC):
             remote_table  = fqtn[1]
             if (remote_schema, remote_table) not in crud_resources:
                 continue
+            if (remote_schema, remote_table) in seen:
+                continue
+            seen.add((remote_schema, remote_table))
             deps.append((remote_schema, remote_table, remote_fk_fields[0]))
         return deps
 
