@@ -496,7 +496,7 @@ def _list_component(
   const hasFilters = $derived(Object.keys(filters).length > 0);
 {"" if not pk_field else f"""
   const displayItems = $derived(
-    hasFilters && auth.fetchedRoutes.has({rname}Api.listUrl({{}}))
+    hasFilters
       ? Array.from({rname}State.byId.values()).filter(item =>
             Object.entries(filters).every(([k, v]) => String((item as any)[k]) === String(v)))
       : {rname}State.items
