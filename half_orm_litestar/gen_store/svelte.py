@@ -234,7 +234,9 @@ export class BaseState<V> {
         this.byId = new Map(data.map(i => [this.pk(i), i]));
     }
     mergeItems(data: V[]) {
-        data.forEach(i => this.byId.set(this.pk(i), i));
+        const m = new Map(this.byId);
+        data.forEach(i => m.set(this.pk(i), i));
+        this.byId = m;
     }
     setItem(item: V) {
         this.byId.set(this.pk(item), item);

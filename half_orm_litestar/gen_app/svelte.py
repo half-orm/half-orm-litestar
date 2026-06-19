@@ -730,9 +730,14 @@ def _detail_page(
             lines.append(f"  import {{ {rn}State, {rn}Api }} from '$lib/stores/{s}.svelte.ts';")
         return ('\n' + '\n'.join(lines)) if lines else ''
 
+    def _lf_ref_name(lf: str) -> str:
+        """user_fk → userFkRef  (always unique — keyed on local field, not remote table)"""
+        parts = lf.split('_')
+        return parts[0] + ''.join(p.capitalize() for p in parts[1:]) + 'Ref'
+
     def _fk_ref_states(deps: list) -> str:
         lines = [
-            f"  let {_rname(rs, rt)}Ref = $state<{_cname(rs, rt)}Out | null>(null);"
+            f"  let {_lf_ref_name(lf)} = $state<{_cname(rs, rt)}Out | null>(null);"
             for lf, rs, rt, _ in deps
         ]
         return ('\n' + '\n'.join(lines)) if lines else ''
@@ -740,33 +745,35 @@ def _detail_page(
     def _fk_ref_effects(deps: list) -> str:
         blocks = []
         for lf, rs, rt, _ in deps:
-            rn  = _rname(rs, rt)
+            rn     = _rname(rs, rt)
+            lf_ref = _lf_ref_name(lf)
             blocks.append(
                 f'  $effect(() => {{\n'
                 f'    if (!item?.{lf}) return;\n'
                 f'    const _url = {rn}Api.getUrl(item.{lf});\n'
                 f'    if (auth.fetchedRoutes.has(_url)) {{\n'
-                f'      {rn}Ref = {rn}State.byId.get(String(item.{lf})) ?? null;\n'
+                f'      {lf_ref} = {rn}State.byId.get(String(item.{lf})) ?? null;\n'
                 f'    }} else {{\n'
                 f'      {rn}Api.get(item.{lf}).then(r => r.ok ? r.json() : null)\n'
-                f'                .then(d => {{ if (d) {{ {rn}State.setItem(d); {rn}Ref = d; }} }});\n'
+                f'                .then(d => {{ if (d) {{ {rn}State.setItem(d); {lf_ref} = d; }} }});\n'
                 f'    }}\n'
                 f'  }});'
             )
         return ('\n' + '\n'.join(blocks)) if blocks else ''
 
     def _fk_ref_section(lf: str, rs: str, rt: str, remote_pk: str) -> str:
-        rn = _rname(rs, rt)
+        rn     = _rname(rs, rt)
+        lf_ref = _lf_ref_name(lf)
         return (
-            f'\n{{#if {rn}Ref}}\n'
+            f'\n{{#if {lf_ref}}}\n'
             f'<div class="max-w-2xl mx-auto mt-4 p-6 bg-white rounded-lg shadow">\n'
             f'  <div class="flex justify-between items-center mb-3">\n'
             f'    <h2 class="text-lg font-semibold">{_title(rs, rt)}</h2>\n'
-            f'    <a href="/{rs}/{rt}/{{{rn}Ref.{remote_pk}}}"'
+            f'    <a href="/{rs}/{rt}/{{{lf_ref}.{remote_pk}}}"'
             f' class="text-sm text-blue-600 hover:underline">→</a>\n'
             f'  </div>\n'
             f'  <div class="space-y-1">\n'
-            f'    {{#each Object.entries({rn}Ref) as [k, v]}}\n'
+            f'    {{#each Object.entries({lf_ref}) as [k, v]}}\n'
             f'      <div class="flex gap-2 items-baseline">\n'
             f'        <span class="font-medium text-gray-600 w-36 shrink-0 text-sm">{{k}}</span>\n'
             f'        <span class="text-sm break-all">{{String(v ?? \'\')}}</span>\n'
