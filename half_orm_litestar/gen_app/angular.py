@@ -333,7 +333,7 @@ export class AuthService {{
 
 def _app_component(resources: list) -> str:
     nav_items_js = ',\n      '.join(
-        f'{{ href: "/{sn}/{tn}", label: "{_title(sn, tn)}" }}'
+        f'{{ href: "/ho_bo/{sn}/{tn}", label: "{_title(sn, tn)}" }}'
         for sn, tn, *_ in resources
     )
     return f"""\
@@ -431,15 +431,15 @@ def _app_routes(resources: list, first_route: str) -> str:
         stem = f'{sn}_{tn}'
         base = f'./generated/components/{stem}'
         lines.append(
-            f"  {{ path: '{sn}/{tn}', canActivate: [authGuard], loadComponent: () => import('{base}/list.component').then(m => m.{cn}ListComponent) }},"
+            f"  {{ path: 'ho_bo/{sn}/{tn}', canActivate: [authGuard], loadComponent: () => import('{base}/list.component').then(m => m.{cn}ListComponent) }},"
         )
         if has_post:
             lines.append(
-                f"  {{ path: '{sn}/{tn}/new', canActivate: [authGuard], loadComponent: () => import('{base}/create.component').then(m => m.{cn}CreateComponent) }},"
+                f"  {{ path: 'ho_bo/{sn}/{tn}/new', canActivate: [authGuard], loadComponent: () => import('{base}/create.component').then(m => m.{cn}CreateComponent) }},"
             )
         if pk_info:
             lines.append(
-                f"  {{ path: '{sn}/{tn}/:id', canActivate: [authGuard], loadComponent: () => import('{base}/detail.component').then(m => m.{cn}DetailComponent) }},"
+                f"  {{ path: 'ho_bo/{sn}/{tn}/:id', canActivate: [authGuard], loadComponent: () => import('{base}/detail.component').then(m => m.{cn}DetailComponent) }},"
             )
     lines += ['];', '']
     return '\n'.join(lines)
@@ -832,7 +832,7 @@ def _list_component(
             rs, rt = fk_map[f]
             return (
                 f'<td class="px-4 py-2 text-sm">'
-                f'<a [routerLink]="[\'/{rs}/{rt}\', item.{f}]" (click)="$event.stopPropagation()"'
+                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', item.{f}]" (click)="$event.stopPropagation()"'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
                 f' [title]="cellTitle(item.{f})">{{{{ fmtCell(item.{f}) }}}}</a>'
                 f'</td>'
@@ -849,7 +849,7 @@ def _list_component(
     td_cols = '\n              '.join(_td(f) for f in out_names)
 
     row_click = (
-        f' (click)="router.navigate([\'/{schema_name}/{table_name}\', item.{pk_field}])"'
+        f' (click)="router.navigate([\'/ho_bo/{schema_name}/{table_name}\', item.{pk_field}])"'
         if pk_field else ''
     )
     cursor = ' cursor-pointer' if pk_field else ''
@@ -869,7 +869,7 @@ def _list_component(
     if has_post:
         new_btn = (
             f'\n        @if (canCreate()) {{\n'
-            f'          <a [routerLink]="[\'/{schema_name}/{table_name}/new\']"\n'
+            f'          <a [routerLink]="[\'/ho_bo/{schema_name}/{table_name}/new\']"\n'
             f'             class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
             f'            New\n          </a>\n        }}'
         )
@@ -1172,7 +1172,7 @@ import type {{ {iname}PostIn }} from '../../../generated/stores/{schema_name}_{t
                   class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm disabled:opacity-50 disabled:cursor-not-allowed">
             Create
           </button>
-          <a routerLink="/{schema_name}/{table_name}"
+          <a routerLink="/ho_bo/{schema_name}/{table_name}"
              class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</a>
         </div>
       </form>
@@ -1190,7 +1190,7 @@ export class {iname}CreateComponent {{
     {submit_body}
       next: (item) => {{
         this.store.setItem(item);
-        void this.router.navigate(['/{schema_name}/{table_name}']);
+        void this.router.navigate(['/ho_bo/{schema_name}/{table_name}']);
       }},
       error: (err: Error) => this.error.set(err.message),
     }});
@@ -1252,7 +1252,7 @@ def _detail_component(
             rs, rt = fk_map[f]
             return (
                 f'<div class="flex gap-2 items-baseline">{label}'
-                f'<a [routerLink]="[\'/{rs}/{rt}\', item()!.{f}]"'
+                f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', item()!.{f}]"'
                 f' class="text-blue-500 hover:underline font-mono text-xs">{{{{ item()!.{f} }}}}</a>'
                 f'</div>'
             )
@@ -1332,7 +1332,7 @@ def _detail_component(
       <div class="mt-4 p-6 bg-white rounded-lg shadow">
         <div class="flex justify-between items-center mb-3">
           <h2 class="text-lg font-semibold">{rt_title}</h2>
-          <a [routerLink]="['/{rs}/{rt}', item()!.{lf}]" class="text-sm text-blue-600 hover:underline">→</a>
+          <a [routerLink]="['/ho_bo/{rs}/{rt}', item()!.{lf}]" class="text-sm text-blue-600 hover:underline">→</a>
         </div>
         @if ({rn_store}.byId().get(str(item()!.{lf})); as ref) {{
           <div class="space-y-1">
@@ -1436,7 +1436,7 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_store_imports}{re
             <div class="flex justify-between items-start mb-6">
               <h1 class="text-2xl font-bold">{title}</h1>
               <div class="flex gap-3 items-center">{edit_btn_tmpl}
-                <a routerLink="/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
+                <a routerLink="/ho_bo/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
               </div>
             </div>
             <div class="space-y-2 mb-4">
@@ -1630,7 +1630,7 @@ class AngularAppGenerator(StoreGenerator):
             (r[0], r[1], r[2], r[10], r[11], r[13])  # sn, tn, mk, has_post, has_put, has_detail
             for r in resources
         ]
-        first_route = f'/{resources[0][0]}/{resources[0][1]}' if resources else '/access'
+        first_route = f'/ho_bo/{resources[0][0]}/{resources[0][1]}' if resources else '/ho_bo'
         self._write(app_dir / 'app.routes.ts',
                     _app_routes(route_meta, first_route))
         self._write(app_dir / 'app.component.ts',

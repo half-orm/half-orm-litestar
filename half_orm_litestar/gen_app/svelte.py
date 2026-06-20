@@ -352,7 +352,7 @@ def _title(schema_name: str, table_name: str) -> str:
 
 def _layout(resources: list) -> str:
     nav_items_js = ',\n    '.join(
-        f'{{ href: "/{sn}/{tn}", label: "{_title(sn, tn)}" }}'
+        f'{{ href: "/ho_bo/{sn}/{tn}", label: "{_title(sn, tn)}" }}'
         for sn, tn, *_ in resources
     )
     return f"""\
@@ -472,8 +472,8 @@ def _list_component(
             rs, rt = fk_map[f]
             return (
                 f'<td class="px-4 py-2 text-sm">'
-                f'<a href="/{rs}/{rt}/{{item.{f}}}"'
-                f' onclick={{(e) => {{ e.preventDefault(); e.stopPropagation(); goto(`/{rs}/{rt}/${{item.{f}}}`); }}}}'
+                f'<a href="/ho_bo/{rs}/{rt}/{{item.{f}}}"'
+                f' onclick={{(e) => {{ e.preventDefault(); e.stopPropagation(); goto(`/ho_bo/{rs}/{rt}/${{item.{f}}}`); }}}}'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
                 f' title="{{cellTitle(item.{f})}}">{{fmtCell(item.{f})}}</a>'
                 f'</td>'
@@ -495,7 +495,7 @@ def _list_component(
     if pk_field:
         tr_open = (
             f'<tr class="border-t hover:bg-gray-50 cursor-pointer"'
-            f' onclick={{() => goto(`/{schema_name}/{table_name}/${{{pk_item_expr}}}`)}}'
+            f' onclick={{() => goto(`/ho_bo/{schema_name}/{table_name}/${{{pk_item_expr}}}`)}}'
             f'>'
         )
     else:
@@ -515,7 +515,7 @@ def _list_component(
 
     new_btn = (
         f'\n  {{#if canCreate}}\n'
-        f'    <a href="/{schema_name}/{table_name}/new"\n'
+        f'    <a href="/ho_bo/{schema_name}/{table_name}/new"\n'
         f'       class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
         f'      New\n    </a>\n  {{/if}}'
         if has_post else ''
@@ -843,7 +843,7 @@ def _new_page(
       if (!res.ok) throw new Error(await res.text());
       const created = await res.json();
       {rname}State.setItem(created);
-      goto('/{schema_name}/{table_name}');
+      goto('/ho_bo/{schema_name}/{table_name}');
     }} catch (err: any) {{
       error = err.message;
     }}
@@ -860,7 +860,7 @@ def _new_page(
               class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
         Create
       </button>
-      <a href="/{schema_name}/{table_name}"
+      <a href="/ho_bo/{schema_name}/{table_name}"
          class="px-4 py-2 border rounded hover:bg-gray-50 text-sm">Cancel</a>
     </div>
   </form>
@@ -887,7 +887,7 @@ def _detail_page(
         if f in fk_map:
             rs, rt = fk_map[f]
             value = (
-                f'<a href="/{rs}/{rt}/{{item.{f}}}"'
+                f'<a href="/ho_bo/{rs}/{rt}/{{item.{f}}}"'
                 f' class="text-blue-500 hover:underline font-mono text-xs">{{item.{f}}}</a>'
             )
         else:
@@ -1033,7 +1033,7 @@ def _detail_page(
             f'<div class="mt-4 p-6 bg-white rounded-lg shadow">\n'
             f'  <div class="flex justify-between items-center mb-3">\n'
             f'    <h2 class="text-lg font-semibold">{_title(rs, rt)}</h2>\n'
-            f'    <a href="/{rs}/{rt}/{{{lf_ref}.{remote_pk}}}"'
+            f'    <a href="/ho_bo/{rs}/{rt}/{{{lf_ref}.{remote_pk}}}"'
             f' class="text-sm text-blue-600 hover:underline">→</a>\n'
             f'  </div>\n'
             f'  <div class="space-y-1">\n'
@@ -1109,7 +1109,7 @@ def _detail_page(
   $effect(() => {{
     const ev = auth.lastEvent;
     if (ev?.resource === '{map_key}' && String(ev.id) === id) {{
-      if (ev.event === 'delete') goto('/{schema_name}/{table_name}');
+      if (ev.event === 'delete') goto('/ho_bo/{schema_name}/{table_name}');
       else untrack(() => {rname}Api.get(id).then(r => r.ok ? r.json() : null)
                 .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }}));
     }}
@@ -1125,7 +1125,7 @@ def _detail_page(
         <h1 class="text-2xl font-bold">{title}</h1>
         <div class="flex gap-3 items-center">
 {edit_btn_wrap}
-          <a href="/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
+          <a href="/ho_bo/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
         </div>
       </div>
 
@@ -1264,9 +1264,9 @@ class SvelteAppGenerator(StoreGenerator):
         routes_dir     = output_dir / 'src' / 'routes'
         components_dir = output_dir / 'src' / 'lib' / 'generated' / 'components'
         self._write(routes_dir / '+layout.svelte', _layout(resources))
-        self._write(routes_dir / '(admin)' / '+layout.svelte', _admin_layout())
+        self._write(routes_dir / 'ho_bo' / '+layout.svelte', _admin_layout())
         first_route = (
-            f'/{resources[0][0]}/{resources[0][1]}' if resources else '/'
+            f'/ho_bo/{resources[0][0]}/{resources[0][1]}' if resources else '/ho_bo'
         )
         self._write(routes_dir / '+page.svelte',
                     _HOME_PAGE.format(first_route=first_route))
@@ -1281,7 +1281,7 @@ class SvelteAppGenerator(StoreGenerator):
              optional_post_fields) in resources:
 
             comp_dir = components_dir / stem
-            res_dir  = routes_dir / '(admin)' / schema_name / table_name
+            res_dir  = routes_dir / 'ho_bo' / schema_name / table_name
 
             # List component + thin page wrapper
             self._write(
