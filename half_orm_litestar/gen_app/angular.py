@@ -1,8 +1,11 @@
 """
-Angular 22 POC application generator.
+Angular 22 backoffice generator.
 
 Signal-based state (no NgRx), standalone components, Tailwind CSS.
-One list / detail / create page per CRUD_ACCESS resource.
+- src/app/generated/stores/        — regenerable stores
+- src/app/generated/components/    — regenerable List/Create/Detail components
+- src/app/core/auth.guard.ts       — route guard (token required)
+- routes use canActivate: [authGuard] for all resource pages
 """
 
 import importlib
@@ -397,9 +400,26 @@ export class AppComponent implements OnInit {{
 """
 
 
+def _auth_guard_ts() -> str:
+    return """\
+import { inject } from '@angular/core';
+import { Router } from '@angular/router';
+import { AuthService } from './auth.service';
+
+export function authGuard(): boolean {
+  const auth   = inject(AuthService);
+  const router = inject(Router);
+  if (auth.token()) return true;
+  void router.navigate(['/login']);
+  return false;
+}
+"""
+
+
 def _app_routes(resources: list, first_route: str) -> str:
     lines = [
         "import { Routes } from '@angular/router';",
+        "import { authGuard } from './core/auth.guard';",
         '',
         'export const routes: Routes = [',
         f"  {{ path: '', redirectTo: '{first_route}', pathMatch: 'full' }},",
@@ -407,18 +427,19 @@ def _app_routes(resources: list, first_route: str) -> str:
         "  { path: 'access', loadComponent: () => import('./pages/access/access.component').then(m => m.AccessComponent) },",
     ]
     for sn, tn, _, has_post, _, pk_info, *__ in resources:
-        cn = _cname(sn, tn)
-        base = f'./pages/{sn}/{tn}'
+        cn   = _cname(sn, tn)
+        stem = f'{sn}_{tn}'
+        base = f'./generated/components/{stem}'
         lines.append(
-            f"  {{ path: '{sn}/{tn}', loadComponent: () => import('{base}/list.component').then(m => m.{cn}ListComponent) }},"
+            f"  {{ path: '{sn}/{tn}', canActivate: [authGuard], loadComponent: () => import('{base}/list.component').then(m => m.{cn}ListComponent) }},"
         )
         if has_post:
             lines.append(
-                f"  {{ path: '{sn}/{tn}/new', loadComponent: () => import('{base}/create.component').then(m => m.{cn}CreateComponent) }},"
+                f"  {{ path: '{sn}/{tn}/new', canActivate: [authGuard], loadComponent: () => import('{base}/create.component').then(m => m.{cn}CreateComponent) }},"
             )
         if pk_info:
             lines.append(
-                f"  {{ path: '{sn}/{tn}/:id', loadComponent: () => import('{base}/detail.component').then(m => m.{cn}DetailComponent) }},"
+                f"  {{ path: '{sn}/{tn}/:id', canActivate: [authGuard], loadComponent: () => import('{base}/detail.component').then(m => m.{cn}DetailComponent) }},"
             )
     lines += ['];', '']
     return '\n'.join(lines)
@@ -602,8 +623,8 @@ def _store(
     lines.append("import { HttpClient, HttpHeaders } from '@angular/common/http';")
     lines.append("import { inject } from '@angular/core';")
     lines.append("import { catchError, of, tap } from 'rxjs';")
-    lines.append("import { AuthService } from '../core/auth.service';")
-    lines.append("import { registerClear } from '../core/state-registry';")
+    lines.append("import { AuthService } from '../../core/auth.service';")
+    lines.append("import { registerClear } from '../../core/state-registry';")
     lines.append('')
 
     def _interface(name: str, field_names: list) -> list:
@@ -764,7 +785,7 @@ def _list_component(
             _unique_fk_deps.append(dep)
 
     fk_imports = '\n'.join(
-        f"import {{ {_cname(rs, rt)}Store }} from '../../../stores/{rs}_{rt}.store';"
+        f"import {{ {_cname(rs, rt)}Store }} from '../../../generated/stores/{rs}_{rt}.store';"
         for _, rs, rt, _ in _unique_fk_deps
     )
     if fk_imports:
@@ -922,8 +943,8 @@ import {{ Component, computed, effect, inject, Input, signal, untracked }} from 
 import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
 {router_link_es}import {{ Router }} from '@angular/router';
-import {{ {iname}Store }} from '../../../stores/{schema_name}_{table_name}.store';
-import type {{ {iname}Out }} from '../../../stores/{schema_name}_{table_name}.store';
+import {{ {iname}Store }} from '../../../generated/stores/{schema_name}_{table_name}.store';
+import type {{ {iname}Out }} from '../../../generated/stores/{schema_name}_{table_name}.store';
 import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
 
 @Component({{
@@ -1133,8 +1154,8 @@ def _create_component(
 import {{ Component, inject, signal }} from '@angular/core';
 import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router }} from '@angular/router';
-import {{ {iname}Store }} from '../../../stores/{schema_name}_{table_name}.store';
-import type {{ {iname}PostIn }} from '../../../stores/{schema_name}_{table_name}.store';
+import {{ {iname}Store }} from '../../../generated/stores/{schema_name}_{table_name}.store';
+import type {{ {iname}PostIn }} from '../../../generated/stores/{schema_name}_{table_name}.store';
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'create')}',
@@ -1200,7 +1221,7 @@ def _detail_component(
             _unique_fk_deps.append(dep)
 
     fk_store_imports = '\n'.join(
-        f"import {{ {_cname(rs, rt)}Store }} from '../../../stores/{rs}_{rt}.store';"
+        f"import {{ {_cname(rs, rt)}Store }} from '../../../generated/stores/{rs}_{rt}.store';"
         for _, rs, rt, _ in _unique_fk_deps
     )
     if fk_store_imports:
@@ -1215,7 +1236,7 @@ def _detail_component(
 
     # Reverse FK list imports
     rev_list_imports = '\n'.join(
-        f"import {{ {_cname(rs, rt)}ListComponent }} from '../../{rs}/{rt}/list.component';"
+        f"import {{ {_cname(rs, rt)}ListComponent }} from '../{rs}_{rt}/list.component';"
         for rs, rt, _ in rev_fk_deps
     )
     if rev_list_imports:
@@ -1399,8 +1420,8 @@ import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
 import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
-import {{ {iname}Store }} from '../../../stores/{schema_name}_{table_name}.store';
-import type {{ {iname}Out{', ' + iname + 'PutIn' if has_put and put_in_names else ''} }} from '../../../stores/{schema_name}_{table_name}.store';
+import {{ {iname}Store }} from '../../../generated/stores/{schema_name}_{table_name}.store';
+import type {{ {iname}Out{', ' + iname + 'PutIn' if has_put and put_in_names else ''} }} from '../../../generated/stores/{schema_name}_{table_name}.store';
 import {{ AuthService }} from '../../../core/auth.service';{fk_store_imports}{rev_list_imports}
 
 @Component({{
@@ -1586,8 +1607,11 @@ class AngularAppGenerator(StoreGenerator):
                 optional_post_fields,
             ))
 
+        # --- auth guard ---
+        self._write(app_dir / 'core' / 'auth.guard.ts', _auth_guard_ts())
+
         # --- stores ---
-        stores_dir = app_dir / 'stores'
+        stores_dir = app_dir / 'generated' / 'stores'
         for (schema_name, table_name, map_key, iname, base_path,
              all_fields, out_names, pk_info, pk_field, pk_ts_type,
              has_post, has_put, has_del, has_detail,
@@ -1618,7 +1642,7 @@ class AngularAppGenerator(StoreGenerator):
         self._write(app_dir / 'pages' / 'access' / 'access.component.ts',
                     _access_component(version_prefix))
 
-        # --- per-resource pages ---
+        # --- per-resource generated components ---
         for (schema_name, table_name, map_key, iname, base_path,
              all_fields, out_names, pk_info, pk_field, pk_ts_type,
              has_post, has_put, has_del, has_detail,
@@ -1626,19 +1650,19 @@ class AngularAppGenerator(StoreGenerator):
              fk_deps, rev_fk_deps,
              optional_post_fields) in resources:
 
-            res_dir = app_dir / 'pages' / schema_name / table_name
+            comp_dir = app_dir / 'generated' / 'components' / f'{schema_name}_{table_name}'
 
-            self._write(res_dir / 'list.component.ts',
+            self._write(comp_dir / 'list.component.ts',
                         _list_component(schema_name, table_name, iname, map_key,
                                         out_names, pk_field, pk_ts_type, has_post, has_del, fk_deps))
 
             if has_post:
-                self._write(res_dir / 'create.component.ts',
+                self._write(comp_dir / 'create.component.ts',
                             _create_component(schema_name, table_name, iname,
                                               post_in_names, all_fields, optional_post_fields))
 
             if has_detail:
-                self._write(res_dir / 'detail.component.ts',
+                self._write(comp_dir / 'detail.component.ts',
                             _detail_component(schema_name, table_name, iname,
                                               pk_field, pk_ts_type,
                                               out_names, put_in_names, has_put,
