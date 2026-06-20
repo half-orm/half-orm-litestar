@@ -117,10 +117,11 @@ def add_commands(main_group):
     @click.option('--output', default=None,
                   help='Output directory (default: frontend/<framework>).')
     def frontend(framework, output):
-        """Generate a throwaway SvelteKit POC from CRUD_ACCESS introspection.
+        """Generate a SvelteKit backoffice from CRUD_ACCESS introspection.
 
         Produces a complete SvelteKit application with Tailwind CSS, Svelte 5
-        runes, per-resource list/detail/create pages, and a minimal JWT login.
+        runes, per-resource List/CreateForm/DetailView components in
+        src/lib/generated/, admin-only route pages, and a minimal JWT login.
 
         Must be run from inside a half-orm-dev project directory.
         """

@@ -1,8 +1,10 @@
 """
-SvelteKit 5 POC application generator.
+SvelteKit 5 backoffice generator.
 
-Produces a throwaway SvelteKit app (Tailwind + TypeScript + Svelte 5 runes)
-with one list/detail/create page per CRUD_ACCESS resource.
+Produces a SvelteKit app (Tailwind + TypeScript + Svelte 5 runes) with:
+  - src/lib/generated/stores/      — regenerable stores + API clients
+  - src/lib/generated/components/  — regenerable List/CreateForm/DetailView components
+  - src/routes/(admin)/            — thin page wrappers (auth-guarded)
 """
 
 import importlib
@@ -534,8 +536,8 @@ def _list_component(
 
     return f"""\
 <script lang="ts">
-  import {{ {rname}State, {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
-  import type {{ {iname}Out }} from '$lib/stores/{stem}.svelte.ts';
+  import {{ {rname}State, {rname}Api }} from '$lib/generated/stores/{stem}.svelte.ts';
+  import type {{ {iname}Out }} from '$lib/generated/stores/{stem}.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ untrack }} from 'svelte';
 {goto_import}
@@ -682,10 +684,48 @@ def _list_component(
 def _list_page(stem: str) -> str:
     return f"""\
 <script lang="ts">
-  import List from '$lib/components/{stem}_list.svelte';
+  import List from '$lib/generated/components/{stem}/List.svelte';
 </script>
 
 <List />
+"""
+
+
+def _admin_layout() -> str:
+    return """\
+<script lang="ts">
+  import { auth } from '$lib/auth.svelte.ts';
+  import { goto } from '$app/navigation';
+
+  let { children } = $props();
+
+  $effect(() => {
+    if (!auth.token) goto('/login');
+  });
+</script>
+
+{#if auth.token}{@render children()}{/if}
+"""
+
+
+def _new_page_wrapper(stem: str) -> str:
+    return f"""\
+<script lang="ts">
+  import CreateForm from '$lib/generated/components/{stem}/CreateForm.svelte';
+</script>
+
+<CreateForm />
+"""
+
+
+def _detail_page_wrapper(stem: str) -> str:
+    return f"""\
+<script lang="ts">
+  import {{ page }} from '$app/state';
+  import DetailView from '$lib/generated/components/{stem}/DetailView.svelte';
+</script>
+
+<DetailView id={{page.params.id}} />
 """
 
 
@@ -781,8 +821,8 @@ def _new_page(
     )
     return f"""\
 <script lang="ts">
-  import {{ {rname}Api, {rname}State }} from '$lib/stores/{stem}.svelte.ts';
-  import type {{ {iname}PostIn }} from '$lib/stores/{stem}.svelte.ts';
+  import {{ {rname}Api, {rname}State }} from '$lib/generated/stores/{stem}.svelte.ts';
+  import type {{ {iname}PostIn }} from '$lib/generated/stores/{stem}.svelte.ts';
   import {{ goto }} from '$app/navigation';
 
   let form = $state<Partial<{iname}PostIn>>({{ {fields_init} }});
@@ -899,7 +939,7 @@ def _detail_page(
             f'        Object.entries(form as unknown as Record<string, unknown>)\n'
             f'          {_null_map_js("putTextFields")}\n'
             f'      ) as unknown as {iname}PutIn;\n'
-            f'      const res = await {rname}Api.update(page.params.id, putPayload);\n'
+            f'      const res = await {rname}Api.update(id, putPayload);\n'
             f'      if (!res.ok) throw new Error(await res.text());\n'
             f'      const updated = await res.json();\n'
             f'      {rname}State.setItem(updated);\n'
@@ -951,7 +991,7 @@ def _detail_page(
                 continue
             seen.add(s)
             rn = _rname(rs, rt)
-            lines.append(f"  import {{ {rn}State, {rn}Api }} from '$lib/stores/{s}.svelte.ts';")
+            lines.append(f"  import {{ {rn}State, {rn}Api }} from '$lib/generated/stores/{s}.svelte.ts';")
         return ('\n' + '\n'.join(lines)) if lines else ''
 
     def _lf_ref_name(lf: str) -> str:
@@ -1015,7 +1055,7 @@ def _detail_page(
 
     # Reverse FK imports and sections
     rev_imports = '\n'.join(
-        f"  import {_cname(rs, rt)}List from '$lib/components/{rs}_{rt}_list.svelte';"
+        f"  import {_cname(rs, rt)}List from '$lib/generated/components/{rs}_{rt}/List.svelte';"
         for rs, rt, _ in rev_fk_deps
     )
     if rev_imports:
@@ -1048,29 +1088,29 @@ def _detail_page(
 
     return f"""\
 <script lang="ts">
-  import {{ {rname}State, {rname}Api }} from '$lib/stores/{stem}.svelte.ts';
-  import type {{ {iname}Out{put_in_import} }} from '$lib/stores/{stem}.svelte.ts';
+  import {{ {rname}State, {rname}Api }} from '$lib/generated/stores/{stem}.svelte.ts';
+  import type {{ {iname}Out{put_in_import} }} from '$lib/generated/stores/{stem}.svelte.ts';
   import {{ goto }} from '$app/navigation';
-  import {{ page }} from '$app/state';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ untrack }} from 'svelte';{fk_imports}{rev_imports}
 
-  let item      = $state<{iname}Out | null>({rname}State.byId.get(page.params.id) ?? null);
+  let {{ id }}: {{ id: string }} = $props();
+  let item      = $state<{iname}Out | null>({rname}State.byId.get(id) ?? null);
   let _lastToken = auth.token;
 {fk_states}
   $effect(() => {{
     const t = auth.token;
     if (t !== _lastToken) {{ _lastToken = t; item = null; }}
     if (!item)
-      {rname}Api.get(page.params.id).then(r => r.ok ? r.json() : null)
+      {rname}Api.get(id).then(r => r.ok ? r.json() : null)
                 .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }});
   }});
 
   $effect(() => {{
     const ev = auth.lastEvent;
-    if (ev?.resource === '{map_key}' && String(ev.id) === page.params.id) {{
+    if (ev?.resource === '{map_key}' && String(ev.id) === id) {{
       if (ev.event === 'delete') goto('/{schema_name}/{table_name}');
-      else untrack(() => {rname}Api.get(page.params.id).then(r => r.ok ? r.json() : null)
+      else untrack(() => {rname}Api.get(id).then(r => r.ok ? r.json() : null)
                 .then(d => {{ if (d) {{ item = d; {rname}State.setItem(d); }} }}));
     }}
   }});
@@ -1133,7 +1173,7 @@ class SvelteAppGenerator(StoreGenerator):
         self._write(output_dir / 'src' / 'app.css',     _APP_CSS)
 
         # --- stores (reuse SvelteGenerator) ---
-        stores_dir = output_dir / 'src' / 'lib' / 'stores'
+        stores_dir = output_dir / 'src' / 'lib' / 'generated' / 'stores'
         SvelteGenerator().generate(classes, api_version, stores_dir)
 
         # --- stateRegistry + auth store + WS env var ---
@@ -1221,8 +1261,10 @@ class SvelteAppGenerator(StoreGenerator):
             ))
 
         # --- layout + home ---
-        routes_dir = output_dir / 'src' / 'routes'
+        routes_dir     = output_dir / 'src' / 'routes'
+        components_dir = output_dir / 'src' / 'lib' / 'generated' / 'components'
         self._write(routes_dir / '+layout.svelte', _layout(resources))
+        self._write(routes_dir / '(admin)' / '+layout.svelte', _admin_layout())
         first_route = (
             f'/{resources[0][0]}/{resources[0][1]}' if resources else '/'
         )
@@ -1231,47 +1273,42 @@ class SvelteAppGenerator(StoreGenerator):
         self._write(routes_dir / 'login'  / '+page.svelte', _login_page(version_prefix))
         self._write(routes_dir / 'access' / '+page.svelte', _access_page(version_prefix))
 
-        # --- reusable list components ---
-        components_dir = output_dir / 'src' / 'lib' / 'components'
+        # --- per-resource components + routes ---
         for (schema_name, table_name, stem, rname, iname,
              out_names, pk_info, pk_field, all_fields,
              has_post, has_put, has_del,
              post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps,
              optional_post_fields) in resources:
+
+            comp_dir = components_dir / stem
+            res_dir  = routes_dir / '(admin)' / schema_name / table_name
+
+            # List component + thin page wrapper
             self._write(
-                components_dir / f'{stem}_list.svelte',
+                comp_dir / 'List.svelte',
                 _list_component(schema_name, table_name, stem, rname, iname,
                                 out_names, pk_info, has_post, has_del, map_key, fk_deps),
             )
-
-        # --- per-resource routes ---
-        for (schema_name, table_name, stem, rname, iname,
-             out_names, pk_info, pk_field, all_fields,
-             has_post, has_put, has_del,
-             post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps,
-             optional_post_fields) in resources:
-
-            res_dir = routes_dir / schema_name / table_name
-
-            # list page — thin wrapper around the reusable component
             self._write(res_dir / '+page.svelte', _list_page(stem))
 
-            # new (POST)
+            # CreateForm component + thin page wrapper
             if has_post:
                 self._write(
-                    res_dir / 'new' / '+page.svelte',
+                    comp_dir / 'CreateForm.svelte',
                     _new_page(schema_name, table_name, stem, rname, iname,
                               post_in_names, all_fields, optional_post_fields),
                 )
+                self._write(res_dir / 'new' / '+page.svelte', _new_page_wrapper(stem))
 
-            # detail (GET by pk)
+            # DetailView component + thin page wrapper
             if pk_info and 'GET' in crud_access:
                 self._write(
-                    res_dir / '[id]' / '+page.svelte',
+                    comp_dir / 'DetailView.svelte',
                     _detail_page(schema_name, table_name, stem, rname, iname,
                                  out_names, put_in_names, pk_field, all_fields,
                                  has_put, fk_deps, rev_fk_deps),
                 )
+                self._write(res_dir / '[id]' / '+page.svelte', _detail_page_wrapper(stem))
 
         print(f'\nSvelteKit app generated in {output_dir}')
         print('Next steps:')
