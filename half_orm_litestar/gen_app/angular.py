@@ -338,7 +338,9 @@ def _app_component(resources: list) -> str:
     )
     return f"""\
 import {{ Component, computed, inject, OnInit, signal }} from '@angular/core';
-import {{ RouterLink, RouterLinkActive, RouterOutlet }} from '@angular/router';
+import {{ RouterLink, RouterLinkActive, RouterOutlet, NavigationEnd, Router }} from '@angular/router';
+import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
+import {{ filter }} from 'rxjs';
 import {{ AuthService }} from './core/auth.service';
 
 @Component({{
@@ -347,32 +349,34 @@ import {{ AuthService }} from './core/auth.service';
   imports: [RouterOutlet, RouterLink, RouterLinkActive],
   template: `
     <div class="h-screen flex bg-gray-50 overflow-hidden">
-      <aside class="w-56 shrink-0 bg-white border-r flex flex-col">
-        <div class="px-4 py-4 border-b">
-          <span class="font-bold text-gray-800">API Browser</span>
-        </div>
-        <div class="px-2 pt-2 pb-1">
-          <input [value]="navFilter()" (input)="navFilter.set($any($event).target.value)"
-                 placeholder="Filter…"
-                 class="w-full text-xs border rounded px-2 py-1 text-gray-700"/>
-        </div>
-        <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
-          @for (item of filteredNav(); track item.href) {{
-            <a [routerLink]="item.href" routerLinkActive="bg-gray-100 font-semibold"
-               class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">
-              {{{{ item.label }}}}
+      @if (!isHome()) {{
+        <aside class="w-56 shrink-0 bg-white border-r flex flex-col">
+          <div class="px-4 py-4 border-b">
+            <span class="font-bold text-gray-800">API Browser</span>
+          </div>
+          <div class="px-2 pt-2 pb-1">
+            <input [value]="navFilter()" (input)="navFilter.set($any($event).target.value)"
+                   placeholder="Filter…"
+                   class="w-full text-xs border rounded px-2 py-1 text-gray-700"/>
+          </div>
+          <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
+            @for (item of filteredNav(); track item.href) {{
+              <a [routerLink]="item.href" routerLinkActive="bg-gray-100 font-semibold"
+                 class="block px-3 py-2 rounded hover:bg-gray-100 text-sm text-gray-700">
+                {{{{ item.label }}}}
+              </a>
+            }}
+          </nav>
+          <div class="px-2 py-3 border-t">
+            <a routerLink="/access" class="block px-3 py-2 rounded hover:bg-gray-100">
+              <div class="text-xs text-gray-400 mb-0.5">Role</div>
+              <div class="text-sm font-medium" [class]="auth.token() ? 'text-blue-700' : 'text-gray-400'">
+                {{{{ auth.token() ?? 'public' }}}}
+              </div>
             </a>
-          }}
-        </nav>
-        <div class="px-2 py-3 border-t">
-          <a routerLink="/access" class="block px-3 py-2 rounded hover:bg-gray-100">
-            <div class="text-xs text-gray-400 mb-0.5">Role</div>
-            <div class="text-sm font-medium" [class]="auth.token() ? 'text-blue-700' : 'text-gray-400'">
-              {{{{ auth.token() ?? 'public' }}}}
-            </div>
-          </a>
-        </div>
-      </aside>
+          </div>
+        </aside>
+      }}
       <main class="flex-1 overflow-y-auto p-6">
         <router-outlet />
       </main>
@@ -380,8 +384,10 @@ import {{ AuthService }} from './core/auth.service';
   `
 }})
 export class AppComponent implements OnInit {{
-  protected auth = inject(AuthService);
+  protected auth   = inject(AuthService);
+  private  router  = inject(Router);
 
+  readonly isHome  = signal(this.router.url === '/');
   navFilter = signal('');
   readonly navItems = [
       {nav_items_js}
@@ -391,6 +397,13 @@ export class AppComponent implements OnInit {{
       ? this.navItems.filter(i => i.label.toLowerCase().includes(this.navFilter().toLowerCase()))
       : this.navItems
   );
+
+  constructor() {{
+    this.router.events.pipe(
+      filter(e => e instanceof NavigationEnd),
+      takeUntilDestroyed(),
+    ).subscribe(e => this.isHome.set((e as NavigationEnd).urlAfterRedirects === '/'));
+  }}
 
   ngOnInit(): void {{
     void this.auth._fetchAccess();
@@ -416,13 +429,42 @@ export function authGuard(): boolean {
 """
 
 
+def _home_component_ts(first_route: str) -> str:
+    return f"""\
+import {{ Component }} from '@angular/core';
+import {{ RouterLink }} from '@angular/router';
+
+@Component({{
+  selector: 'app-home',
+  standalone: true,
+  imports: [RouterLink],
+  template: `
+    <div class="flex flex-col items-center justify-center h-full bg-gray-50 py-16">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 250 250" width="80" height="80" class="mb-6">
+        <path d="M125 30L31.9 63.2l14.2 123.1L125 230l78.9-43.7 14.2-123.1z" fill="#DD0031"/>
+        <path d="M125 30v22.2-.1V230l78.9-43.7 14.2-123.1L125 30z" fill="#C3002F"/>
+        <path d="M125 52.1L66.8 182.6h21.7l11.7-29.2h49.4l11.7 29.2H173L125 52.1zm17 83.3h-34l17-40.9 17 40.9z" fill="#fff"/>
+      </svg>
+      <h1 class="text-3xl font-bold text-gray-800 mb-2">halfORM Backoffice</h1>
+      <p class="text-gray-500 mb-8">Powered by Angular</p>
+      <a [routerLink]="['{first_route}']"
+         class="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 font-medium transition-colors">
+        Open Backoffice →
+      </a>
+    </div>
+  `
+}})
+export class HomeComponent {{}}
+"""
+
+
 def _app_routes(resources: list, first_route: str) -> str:
     lines = [
         "import { Routes } from '@angular/router';",
         "import { authGuard } from './core/auth.guard';",
         '',
         'export const routes: Routes = [',
-        f"  {{ path: '', redirectTo: '{first_route}', pathMatch: 'full' }},",
+        "  { path: '', loadComponent: () => import('./pages/home/home.component').then(m => m.HomeComponent) },",
         "  { path: 'login',  loadComponent: () => import('./pages/login/login.component').then(m => m.LoginComponent) },",
         "  { path: 'access', loadComponent: () => import('./pages/access/access.component').then(m => m.AccessComponent) },",
     ]
@@ -1636,7 +1678,9 @@ class AngularAppGenerator(StoreGenerator):
         self._write(app_dir / 'app.component.ts',
                     _app_component([(r[0], r[1]) for r in resources]))
 
-        # --- login + access pages ---
+        # --- home + login + access pages ---
+        self._write(app_dir / 'pages' / 'home'   / 'home.component.ts',
+                    _home_component_ts(first_route), once=True)
         self._write(app_dir / 'pages' / 'login'  / 'login.component.ts',
                     _login_component(version_prefix))
         self._write(app_dir / 'pages' / 'access' / 'access.component.ts',
@@ -1674,7 +1718,10 @@ class AngularAppGenerator(StoreGenerator):
         print('  npm install')
         print('  npm start')
 
-    def _write(self, path: Path, content: str) -> None:
+    def _write(self, path: Path, content: str, *, once: bool = False) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
+        if once and path.exists():
+            print(f'  {path}  (skipped — developer-owned)')
+            return
         path.write_text(content, encoding='utf-8')
         print(f'  {path}')
