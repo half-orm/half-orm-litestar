@@ -58,13 +58,18 @@ def _simple_pk(relation) -> Tuple[str, str, str] | None:
 
 
 def _filter_params_str(all_fields: dict) -> Tuple[str, str]:
-    """Return (filter_params_block, filter_dict_str) for query-param filters."""
+    """Return (filter_params_block, filter_dict_str) for query-param filters.
+
+    All column filters are prefixed with 'ho_col_' to avoid conflicts with
+    custom business logic parameters in @api_* decorated methods.
+    """
     lines = []
     dict_items = []
     for fname, fobj in all_fields.items():
         type_str = _py_type_str(fobj.py_type)
-        lines.append(f'    {fname}: Optional[{type_str}] = None,\n')
-        dict_items.append(f"'{fname}': {fname}")
+        param_name = f'ho_col_{fname}'
+        lines.append(f'    {param_name}: Optional[{type_str}] = None,\n')
+        dict_items.append(f"'{fname}': {param_name}")
     return ''.join(lines), ', '.join(dict_items)
 
 

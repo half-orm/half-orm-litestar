@@ -170,7 +170,9 @@ class SvelteGenerator(StoreGenerator):
                 api_entries.append(
                     f"    listUrl: (params: Partial<{iname}Out> = {{}}) => {{\n"
                     f"                 const filtered = Object.fromEntries(\n"
-                    f"                   Object.entries(params).filter(([_, v]) => v != null && (typeof v !== 'string' || v !== ''))\n"
+                    f"                   Object.entries(params)\n"
+                    f"                     .filter(([_, v]) => v != null && (typeof v !== 'string' || v !== ''))\n"
+                    f"                     .map(([k, v]) => [`ho_col_${{k}}`, v])\n"
                     f"                 );\n"
                     f"                 const qs = new URLSearchParams(filtered as any).toString();\n"
                     f"                 return qs ? _BASE + '?' + qs : _BASE;\n"
@@ -179,7 +181,9 @@ class SvelteGenerator(StoreGenerator):
                 api_entries.append(
                     f"    list:    (params: Partial<{iname}Out> = {{}}) => {{\n"
                     f"                 const filtered = Object.fromEntries(\n"
-                    f"                   Object.entries(params).filter(([_, v]) => v != null && (typeof v !== 'string' || v !== ''))\n"
+                    f"                   Object.entries(params)\n"
+                    f"                     .filter(([_, v]) => v != null && (typeof v !== 'string' || v !== ''))\n"
+                    f"                     .map(([k, v]) => [`ho_col_${{k}}`, v])\n"
                     f"                 );\n"
                     f"                 const qs = new URLSearchParams(filtered as any).toString();\n"
                     f"                 const url = qs ? _BASE + '?' + qs : _BASE;\n"
