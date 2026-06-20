@@ -1042,9 +1042,9 @@ import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
         <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
       </div>
     }}
-    <div [class]="embedded ? '' : 'bg-white shadow-sm rounded-lg overflow-hidden'">
+    <div [class]="embedded ? '' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
       <table class="w-full border-collapse">
-        <thead class="bg-gray-100">
+        <thead [class]="embedded ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'">
           <tr>
             {action_th}
             {th_cols}
