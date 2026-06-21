@@ -1052,53 +1052,9 @@ def _list_component(
         for fname in out_names if fname in all_fields
     )
     field_types_map = f"""
-  private readonly fieldTypes: Record<string, 'date' | 'datetime' | 'number' | 'string'> = {{
+  private readonly fieldTypes: Record<string, FieldType> = {{
     {field_types_entries}
-  }};
-
-  private isValidFilterValue(field: string, value: string): boolean {{
-    const fieldType = this.fieldTypes[field];
-    if (!fieldType) return true;
-
-    // Extract operator and operand
-    const match = value.match(/^(>=|>|<=|<)(.*)$/);
-    const operand = match ? match[2].trim() : value;
-
-    switch (fieldType) {{
-      case 'date':
-        // Must match YYYY-MM-DD format
-        return /^\\d{{4}}-\\d{{2}}-\\d{{2}}$/.test(operand);
-      case 'datetime':
-        // Must match YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM or with seconds, or just YYYY-MM-DD
-        return /^\\d{{4}}-\\d{{2}}-\\d{{2}}([ T]\\d{{2}}:\\d{{2}}(:\\d{{2}})?)?$/.test(operand);
-      case 'number':
-        // Must be a valid number
-        return !isNaN(Number(operand)) && operand.trim() !== '';
-      default:
-        return true;
-    }}
-  }}
-
-  private normalizeFilterValue(field: string, value: string): string {{
-    const fieldType = this.fieldTypes[field];
-    if (!fieldType) return value;
-
-    const match = value.match(/^(>=|>|<=|<)(.*)$/);
-    const operator = match ? match[1] : '';
-    const operand = match ? match[2].trim() : value;
-
-    if (fieldType === 'datetime') {{
-      // Replace 'T' with space for backend compatibility
-      let normalized = operand.replace('T', ' ');
-      // If only date is provided (YYYY-MM-DD), append 00:00
-      if (/^\\d{{4}}-\\d{{2}}-\\d{{2}}$/.test(normalized)) {{
-        normalized = normalized + ' 00:00';
-      }}
-      return operator + normalized;
-    }}
-
-    return value;
-  }}"""
+  }};"""
 
     displayItems_block = f"""\
   readonly displayItems = computed(() => {{
@@ -1109,7 +1065,7 @@ def _list_component(
     const lf = this.localFilters();
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
-        Object.entries(lf).every(([k, v]) => this.matchFilter((item as any)[k], v)));
+        Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
     const sf = this.store.sortField();
     if (sf) {{
       const asc = this.store.sortAsc();
@@ -1145,7 +1101,9 @@ import {{ filter }} from 'rxjs';
 import {{ Location }} from '@angular/common';
 import {{ {iname}Store }} from '../../../generated/stores/{schema_name}_{table_name}.store';
 import type {{ {iname}Out }} from '../../../generated/stores/{schema_name}_{table_name}.store';
-import {{ AuthService }} from '../../../core/auth.service';{fk_imports}
+import {{ AuthService }} from '../../../core/auth.service';
+import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '../../../generated/stores/filters';
+import type {{ FieldType }} from '../../../generated/stores/filters';{fk_imports}
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'list')}',
@@ -1201,7 +1159,10 @@ export class {iname}ListComponent {{
   private route = inject(ActivatedRoute);
   private location = inject(Location);{fk_injects}
   protected String = String;  // For template use
-  protected Object = Object;  // For template use{pk_id_line}
+  protected Object = Object;  // For template use
+  protected matchFilter = matchFilter;  // For template use
+  protected fmtCell = fmtCell;  // For template use
+  protected cellTitle = cellTitle;  // For template use{pk_id_line}
   private destroyRef = inject(DestroyRef);
 
   @ViewChildren('dataRow') dataRows!: QueryList<ElementRef<HTMLTableRowElement>>;
@@ -1288,8 +1249,8 @@ export class {iname}ListComponent {{
       // Only include valid filters based on field type
       const filterPairs: string[] = [];
       Object.entries(updated).forEach(([key, val]) => {{
-        if (val && this.isValidFilterValue(key, val)) {{
-          const normalizedVal = this.normalizeFilterValue(key, val);
+        if (val && isValidFilterValue(key, val, this.fieldTypes)) {{
+          const normalizedVal = normalizeFilterValue(key, val, this.fieldTypes);
           filterPairs.push(`${{key}}:${{normalizedVal}}`);
         }}
       }});
@@ -1313,73 +1274,12 @@ export class {iname}ListComponent {{
   cellClick(e: Event, v: unknown): void {{
     if (v != null && typeof v === 'object') {{ e.stopPropagation(); this.showJson(v); }}
   }}
-  removeAccents(s: string): string {{
-    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  }}
-  matchFilter(itemValue: unknown, filterValue: string): boolean {{
-    if (!filterValue) return true;
-
-    // Detect comparison operator
-    const match = filterValue.match(/^(>=|>|<=|<)(.*)$/);
-    if (match) {{
-      const [, op, val] = match;
-      const trimmedVal = val.trim();
-
-      // Try numeric comparison first
-      const numVal = Number(trimmedVal);
-      const numItem = Number(itemValue);
-      if (!isNaN(numVal) && !isNaN(numItem)) {{
-        if (op === '>=') return numItem >= numVal;
-        if (op === '>') return numItem > numVal;
-        if (op === '<=') return numItem <= numVal;
-        if (op === '<') return numItem < numVal;
-      }}
-
-      // Otherwise lexicographic comparison (for dates/strings)
-      // Normalize datetime: replace 'T' with space for consistent comparison
-      const strItem = String(itemValue ?? '').replace('T', ' ');
-      const normalizedVal = trimmedVal.replace('T', ' ');
-      if (op === '>=') return strItem >= normalizedVal;
-      if (op === '>') return strItem > normalizedVal;
-      if (op === '<=') return strItem <= normalizedVal;
-      if (op === '<') return strItem < normalizedVal;
-    }}
-
-    // Normal text filter (startsWith + unaccent)
-    return this.removeAccents(String(itemValue ?? '').toLowerCase())
-      .startsWith(this.removeAccents(filterValue.toLowerCase()));
-  }}
-  fmtCell(v: unknown): string {{
-    if (v == null) return '';
-    if (Array.isArray(v)) return `JSON [${{v.length}}]`;
-    if (typeof v === 'object') return 'JSON {{…}}';
-    const s = String(v);
-    return /^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$/i.test(s)
-      ? s.slice(0, 8) + '…' : s;
-  }}
-  cellTitle(v: unknown): string {{
-    if (v == null || typeof v === 'object') return '';
-    return String(v);
-  }}
 
   private initFiltersFromUrl(): void {{
     if (this.embedded) return; // Don't sync URL for embedded components
 
     const params = this.route.snapshot.queryParams;
-    const urlFilters: Record<string, string> = {{}};
-
-    // Try to get filters from URL first
-    Object.entries(params).forEach(([key, value]) => {{
-      if (key.startsWith('f_') && typeof value === 'string') {{
-        const fieldName = key.substring(2);
-        const decodedValue = decodeURIComponent(value);
-
-        // Validate before accepting
-        if (this.isValidFilterValue(fieldName, decodedValue)) {{
-          urlFilters[fieldName] = decodedValue;
-        }}
-      }}
-    }});
+    const urlFilters = parseFiltersFromUrl(params, this.fieldTypes);
 
     // If URL has filters, use them (priority)
     if (Object.keys(urlFilters).length > 0) {{
@@ -1411,12 +1311,9 @@ export class {iname}ListComponent {{
       }}
     }});
 
-    // Add filter params
-    Object.entries(filters).forEach(([field, value]) => {{
-      if (value && this.isValidFilterValue(field, value)) {{
-        queryParams[`f_${{field}}`] = encodeURIComponent(value);
-      }}
-    }});
+    // Add filter params (using shared function)
+    const filterParams = encodeFiltersToUrlParams(filters, this.fieldTypes);
+    Object.assign(queryParams, filterParams);
 
     // Use replaceState to avoid polluting browser history
     const urlTree = this.router.createUrlTree([], {{
@@ -2028,6 +1925,13 @@ class AngularAppGenerator(StoreGenerator):
                        out_names, all_fields, pk_field, pk_ts_type, pk_extractor,
                        has_post, has_put, has_del, post_in_names, put_in_names),
             )
+
+        # --- shared filters module ---
+        package_dir = Path(__file__).parent.parent
+        filters_src = package_dir / 'templates_filters.ts'
+        if filters_src.exists():
+            shutil.copy2(filters_src, stores_dir / 'filters.ts')
+            print(f'  {stores_dir / "filters.ts"}')
 
         # --- app routes + app component ---
         route_meta = [

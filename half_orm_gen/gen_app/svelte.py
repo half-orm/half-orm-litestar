@@ -591,70 +591,15 @@ def _list_component(
         for fname in out_names if fname in all_fields
     )
     field_types_code = f"""
-  const fieldTypes: Record<string, 'date' | 'datetime' | 'number' | 'string'> = {{
+  import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '$lib/generated/stores/filters';
+  import type {{ FieldType }} from '$lib/generated/stores/filters';
+
+  const fieldTypes: Record<string, FieldType> = {{
     {field_types_entries}
   }};
 
-  function isValidFilterValue(field: string, value: string): boolean {{
-    const fieldType = fieldTypes[field];
-    if (!fieldType) return true;
-
-    // Extract operator and operand
-    const match = value.match(/^(>=|>|<=|<)(.*)$/);
-    const operand = match ? match[2].trim() : value;
-
-    switch (fieldType) {{
-      case 'date':
-        // Must match YYYY-MM-DD format
-        return /^\\d{{4}}-\\d{{2}}-\\d{{2}}$/.test(operand);
-      case 'datetime':
-        // Must match YYYY-MM-DD HH:MM or YYYY-MM-DDTHH:MM or with seconds, or just YYYY-MM-DD
-        return /^\\d{{4}}-\\d{{2}}-\\d{{2}}([ T]\\d{{2}}:\\d{{2}}(:\\d{{2}})?)?$/.test(operand);
-      case 'number':
-        // Must be a valid number
-        return !isNaN(Number(operand)) && operand.trim() !== '';
-      default:
-        return true;
-    }}
-  }}
-
-  function normalizeFilterValue(field: string, value: string): string {{
-    const fieldType = fieldTypes[field];
-    if (!fieldType) return value;
-
-    const match = value.match(/^(>=|>|<=|<)(.*)$/);
-    const operator = match ? match[1] : '';
-    const operand = match ? match[2].trim() : value;
-
-    if (fieldType === 'datetime') {{
-      // Replace 'T' with space for backend compatibility
-      let normalized = operand.replace('T', ' ');
-      // If only date is provided (YYYY-MM-DD), append 00:00
-      if (/^\\d{{4}}-\\d{{2}}-\\d{{2}}$/.test(normalized)) {{
-        normalized = normalized + ' 00:00';
-      }}
-      return operator + normalized;
-    }}
-
-    return value;
-  }}
-
   function initFiltersFromUrl(searchParams: URLSearchParams): Record<string, string> {{
-    const urlFilters: Record<string, string> = {{}};
-
-    searchParams.forEach((value, key) => {{
-      if (key.startsWith('f_')) {{
-        const fieldName = key.substring(2);
-        const decodedValue = decodeURIComponent(value);
-
-        // Validate before accepting
-        if (isValidFilterValue(fieldName, decodedValue)) {{
-          urlFilters[fieldName] = decodedValue;
-        }}
-      }}
-    }});
-
-    return urlFilters;
+    return parseFiltersFromUrl(searchParams, fieldTypes);
   }}
 
   function buildUrlWithFilters(currentPath: string, filters: Record<string, string>): string {{
@@ -665,11 +610,10 @@ def _list_component(
       .filter(k => k.startsWith('f_'))
       .forEach(k => url.searchParams.delete(k));
 
-    // Add current filters
-    Object.entries(filters).forEach(([field, value]) => {{
-      if (value && isValidFilterValue(field, value)) {{
-        url.searchParams.set(`f_${{field}}`, encodeURIComponent(value));
-      }}
+    // Add current filters (using shared function)
+    const filterParams = encodeFiltersToUrlParams(filters, fieldTypes);
+    Object.entries(filterParams).forEach(([key, value]) => {{
+      url.searchParams.set(key, value);
     }});
 
     return url.pathname + url.search;
@@ -804,8 +748,8 @@ def _list_component(
       // Only include valid filters based on field type
       const filterPairs: string[] = [];
       Object.entries(localFilters).forEach(([key, val]) => {{
-        if (val && isValidFilterValue(key, val)) {{
-          const normalizedVal = normalizeFilterValue(key, val);
+        if (val && isValidFilterValue(key, val, fieldTypes)) {{
+          const normalizedVal = normalizeFilterValue(key, val, fieldTypes);
           filterPairs.push(`${{key}}:${{normalizedVal}}`);
         }}
       }});
@@ -896,54 +840,6 @@ def _list_component(
 {can_create}{can_delete}{delete_fn}
   let jsonDialog = $state<string | null>(null);
   function showJson(v: unknown): void {{ jsonDialog = JSON.stringify(v, null, 2); }}
-  function removeAccents(s: string): string {{
-    return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  }}
-  function matchFilter(itemValue: unknown, filterValue: string): boolean {{
-    if (!filterValue) return true;
-
-    // Detect comparison operator
-    const match = filterValue.match(/^(>=|>|<=|<)(.*)$/);
-    if (match) {{
-      const [, op, val] = match;
-      const trimmedVal = val.trim();
-
-      // Try numeric comparison first
-      const numVal = Number(trimmedVal);
-      const numItem = Number(itemValue);
-      if (!isNaN(numVal) && !isNaN(numItem)) {{
-        if (op === '>=') return numItem >= numVal;
-        if (op === '>') return numItem > numVal;
-        if (op === '<=') return numItem <= numVal;
-        if (op === '<') return numItem < numVal;
-      }}
-
-      // Otherwise lexicographic comparison (for dates/strings)
-      // Normalize datetime: replace 'T' with space for consistent comparison
-      const strItem = String(itemValue ?? '').replace('T', ' ');
-      const normalizedVal = trimmedVal.replace('T', ' ');
-      if (op === '>=') return strItem >= normalizedVal;
-      if (op === '>') return strItem > normalizedVal;
-      if (op === '<=') return strItem <= normalizedVal;
-      if (op === '<') return strItem < normalizedVal;
-    }}
-
-    // Normal text filter (startsWith + unaccent)
-    return removeAccents(String(itemValue ?? '').toLowerCase())
-      .startsWith(removeAccents(filterValue.toLowerCase()));
-  }}
-  function fmtCell(v: unknown): string {{
-    if (v == null) return '';
-    if (Array.isArray(v)) return `JSON [${{v.length}}]`;
-    if (typeof v === 'object') return 'JSON {{…}}';
-    const s = String(v);
-    return /^[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}$/i.test(s)
-      ? s.slice(0, 8) + '…' : s;
-  }}
-  function cellTitle(v: unknown): string {{
-    if (v == null || typeof v === 'object') return '';
-    return String(v);
-  }}
 </script>
 
 {{#if !embedded}}

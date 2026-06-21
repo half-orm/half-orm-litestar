@@ -24,6 +24,7 @@ class SvelteGenerator(StoreGenerator):
             shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True)
         self._write_base(output_dir)
+        self._write_filters(output_dir)
         version_prefix = f'/v{api_version}' if api_version is not None else ''
 
         # Pass 1: collect resources that have CRUD_ACCESS
@@ -290,6 +291,20 @@ export class BaseState<V> {
         base_file = output_dir / 'base.svelte.ts'
         base_file.write_text(content, encoding='utf-8')
         print(f'  {base_file}')
+
+    def _write_filters(self, output_dir: Path) -> None:
+        """Copy the shared filters module to the output directory."""
+        import os
+        # Get the path to templates_filters.ts in the package
+        package_dir = Path(__file__).parent.parent
+        filters_src = package_dir / 'templates_filters.ts'
+
+        if filters_src.exists():
+            filters_dst = output_dir / 'filters.ts'
+            shutil.copy2(filters_src, filters_dst)
+            print(f'  {filters_dst}')
+        else:
+            print(f'  Warning: {filters_src} not found, skipping filters module')
 
     def _interface(self, name: str, field_names: list, all_fields: dict) -> str:
         if not field_names:
