@@ -398,16 +398,27 @@ async def {handler_name}(
     filter_kwargs = {{{filter_dict}}}
 
     # Parse 'q' parameter for search (format: col1:val1,col2:val2)
+    # Values can start with comparison operators: >=, >, <=, <
     search_cols = []
     if q:
+        import re
         for pair in q.split(','):
             if ':' in pair:
                 col, val = pair.split(':', 1)
                 col = col.strip()
                 val = val.strip()
                 if col and val and col not in api_excluded:
-                    filter_kwargs[col] = ('ilike', val + '%')
-                    search_cols.append(col)
+                    # Check for comparison operator at start
+                    match = re.match(r'^(>=|>|<=|<)(.*)$', val)
+                    if match:
+                        op, operand = match.groups()
+                        operand = operand.strip()
+                        if operand:  # Only add filter if operand is not empty
+                            filter_kwargs[col] = (op, operand)
+                    else:
+                        # Default: ilike with prefix matching
+                        filter_kwargs[col] = ('ilike', val + '%')
+                        search_cols.append(col)
 
     role_filter = _get_role_filter(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles)
     authorized = _effective_out_fields(getattr({module_alias}, 'CRUD_ACCESS', {{}}), "GET", roles, api_excluded)

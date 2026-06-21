@@ -44,6 +44,18 @@ def _title(schema_name: str, table_name: str) -> str:
     return f'{schema_name}.{table_name}'
 
 
+def _field_type_category(field_obj) -> str:
+    """Map Python type to validation category: date, datetime, number, or string."""
+    py_type = _py_type_str(field_obj.py_type)
+    if py_type == 'datetime.date':
+        return 'date'
+    if py_type == 'datetime.datetime':
+        return 'datetime'
+    if py_type in ('int', 'float', 'decimal.Decimal'):
+        return 'number'
+    return 'string'
+
+
 def _store_import_path(schema_name: str, table_name: str, depth: int) -> str:
     prefix = '../' * depth
     return f"{prefix}stores/{schema_name}_{table_name}.store"
@@ -860,6 +872,7 @@ def _list_component(
     out_names: list, pk_field: str | None, pk_ts_type: str, pk_extractor: str | None,
     has_post: bool, has_del: bool,
     fk_deps: list,
+    all_fields: dict,
 ) -> str:
     title  = _title(schema_name, table_name)
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
@@ -1002,6 +1015,39 @@ def _list_component(
             '          Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v)))'
         )
 
+    # Generate field type map for validation
+    field_types_entries = ', '.join(
+        f"'{fname}': '{_field_type_category(all_fields[fname])}'"
+        for fname in out_names if fname in all_fields
+    )
+    field_types_map = f"""
+  private readonly fieldTypes: Record<string, 'date' | 'datetime' | 'number' | 'string'> = {{
+    {field_types_entries}
+  }};
+
+  private isValidFilterValue(field: string, value: string): boolean {{
+    const fieldType = this.fieldTypes[field];
+    if (!fieldType) return true;
+
+    // Extract operator and operand
+    const match = value.match(/^(>=|>|<=|<)(.*)$/);
+    const operand = match ? match[2].trim() : value;
+
+    switch (fieldType) {{
+      case 'date':
+        // Must match YYYY-MM-DD format
+        return /^\\d{{4}}-\\d{{2}}-\\d{{2}}$/.test(operand);
+      case 'datetime':
+        // Must match YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS format
+        return /^\\d{{4}}-\\d{{2}}-\\d{{2}} \\d{{2}}:\\d{{2}}(:\\d{{2}})?$/.test(operand);
+      case 'number':
+        // Must be a valid number
+        return !isNaN(Number(operand)) && operand.trim() !== '';
+      default:
+        return true;
+    }}
+  }}"""
+
     displayItems_block = f"""\
   readonly displayItems = computed(() => {{
     const hasFilters = Object.keys(this.filters).length > 0;
@@ -1011,9 +1057,7 @@ def _list_component(
     const lf = this.localFilters();
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
-        Object.entries(lf).every(([k, v]) =>
-          !v || this.removeAccents(String((item as any)[k] ?? '').toLowerCase())
-                  .startsWith(this.removeAccents(v.toLowerCase()))));
+        Object.entries(lf).every(([k, v]) => this.matchFilter((item as any)[k], v)));
     const sf = this.sortField();
     if (sf) {{
       const asc = this.sortAsc();
@@ -1111,6 +1155,7 @@ export class {iname}ListComponent {{
   sortField    = signal<string | null>(null);
   sortAsc      = signal(true);
 {can_create}{can_delete}
+{field_types_map}
 {displayItems_block}
 
   constructor() {{
@@ -1177,9 +1222,12 @@ export class {iname}ListComponent {{
     if (this.filterDebounceTimer) clearTimeout(this.filterDebounceTimer);
     this.filterDebounceTimer = window.setTimeout(() => {{
       // Convert local filters to backend search query (q=col1:val1,col2:val2)
+      // Only include valid filters based on field type
       const filterPairs: string[] = [];
       Object.entries(updated).forEach(([key, val]) => {{
-        if (val) filterPairs.push(`${{key}}:${{val}}`);
+        if (val && this.isValidFilterValue(key, val)) {{
+          filterPairs.push(`${{key}}:${{val}}`);
+        }}
       }});
       const hasFiltersNow = filterPairs.length > 0;
       // Only trigger if we have filters now, or we had filters before (to clear them)
@@ -1199,6 +1247,37 @@ export class {iname}ListComponent {{
   }}
   removeAccents(s: string): string {{
     return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }}
+  matchFilter(itemValue: unknown, filterValue: string): boolean {{
+    if (!filterValue) return true;
+
+    // Detect comparison operator
+    const match = filterValue.match(/^(>=|>|<=|<)(.*)$/);
+    if (match) {{
+      const [, op, val] = match;
+      const trimmedVal = val.trim();
+
+      // Try numeric comparison first
+      const numVal = Number(trimmedVal);
+      const numItem = Number(itemValue);
+      if (!isNaN(numVal) && !isNaN(numItem)) {{
+        if (op === '>=') return numItem >= numVal;
+        if (op === '>') return numItem > numVal;
+        if (op === '<=') return numItem <= numVal;
+        if (op === '<') return numItem < numVal;
+      }}
+
+      // Otherwise lexicographic comparison (for dates/strings)
+      const strItem = String(itemValue ?? '');
+      if (op === '>=') return strItem >= trimmedVal;
+      if (op === '>') return strItem > trimmedVal;
+      if (op === '<=') return strItem <= trimmedVal;
+      if (op === '<') return strItem < trimmedVal;
+    }}
+
+    // Normal text filter (startsWith + unaccent)
+    return this.removeAccents(String(itemValue ?? '').toLowerCase())
+      .startsWith(this.removeAccents(filterValue.toLowerCase()));
   }}
   fmtCell(v: unknown): string {{
     if (v == null) return '';
@@ -1840,7 +1919,7 @@ class AngularAppGenerator(StoreGenerator):
 
             self._write(comp_dir / 'list.component.ts',
                         _list_component(schema_name, table_name, iname, map_key,
-                                        out_names, pk_field, pk_ts_type, pk_extractor, has_post, has_del, fk_deps))
+                                        out_names, pk_field, pk_ts_type, pk_extractor, has_post, has_del, fk_deps, all_fields))
 
             if has_post:
                 self._write(comp_dir / 'create.component.ts',

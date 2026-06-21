@@ -24,6 +24,22 @@ from half_orm_gen.gen_store.base import StoreGenerator
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _field_type_category(field_obj) -> str:
+    """Map Python type to validation category: date, datetime, number, or string."""
+    py_type = _py_type_str(field_obj.py_type)
+    if py_type == 'datetime.date':
+        return 'date'
+    if py_type == 'datetime.datetime':
+        return 'datetime'
+    if py_type in ('int', 'float', 'decimal.Decimal'):
+        return 'number'
+    return 'string'
+
+
+# ---------------------------------------------------------------------------
 # Static file templates
 # ---------------------------------------------------------------------------
 
@@ -434,6 +450,7 @@ def _list_component(
     has_post: bool, has_del: bool,
     map_key: str,
     fk_deps: list,
+    all_fields: dict,
 ) -> str:
     pk_field = pk_info[0][0] if pk_info else None
     if len(pk_info) == 1:
@@ -546,6 +563,39 @@ def _list_component(
     )
     goto_import = "  import { goto } from '$app/navigation';\n" if pk_field else ''
 
+    # Generate field type map for validation
+    field_types_entries = ', '.join(
+        f"'{fname}': '{_field_type_category(all_fields[fname])}'"
+        for fname in out_names if fname in all_fields
+    )
+    field_types_code = f"""
+  const fieldTypes: Record<string, 'date' | 'datetime' | 'number' | 'string'> = {{
+    {field_types_entries}
+  }};
+
+  function isValidFilterValue(field: string, value: string): boolean {{
+    const fieldType = fieldTypes[field];
+    if (!fieldType) return true;
+
+    // Extract operator and operand
+    const match = value.match(/^(>=|>|<=|<)(.*)$/);
+    const operand = match ? match[2].trim() : value;
+
+    switch (fieldType) {{
+      case 'date':
+        // Must match YYYY-MM-DD format
+        return /^\\d{{4}}-\\d{{2}}-\\d{{2}}$/.test(operand);
+      case 'datetime':
+        // Must match YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS format
+        return /^\\d{{4}}-\\d{{2}}-\\d{{2}} \\d{{2}}:\\d{{2}}(:\\d{{2}})?$/.test(operand);
+      case 'number':
+        // Must be a valid number
+        return !isNaN(Number(operand)) && operand.trim() !== '';
+      default:
+        return true;
+    }}
+  }}"""
+
     return f"""\
 <script lang="ts">
   import {{ {rname}State, {rname}Api }} from '$lib/generated/stores/{stem}.svelte.ts';
@@ -569,9 +619,7 @@ def _list_component(
     const lf = localFilters;
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
-        Object.entries(lf).every(([k, v]) =>
-          !v || removeAccents(String((item as any)[k] ?? '').toLowerCase())
-                  .startsWith(removeAccents(v.toLowerCase()))));
+        Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
     const sf = sortField;
     if (sf) {{
       const asc = sortAsc;
@@ -593,9 +641,7 @@ def _list_component(
     const lf = localFilters;
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
-        Object.entries(lf).every(([k, v]) =>
-          !v || removeAccents(String((item as any)[k] ?? '').toLowerCase())
-                  .startsWith(removeAccents(v.toLowerCase()))));
+        Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
     const sf = sortField;
     if (sf) {{
       const asc = sortAsc;
@@ -608,6 +654,7 @@ def _list_component(
     return items;
   }});
 """.rstrip()}
+{field_types_code}
 
   let hasMore = $state(true);
   let currentOffset = $state(0);
@@ -646,9 +693,12 @@ def _list_component(
     if (filterDebounceTimer) clearTimeout(filterDebounceTimer);
     filterDebounceTimer = window.setTimeout(() => {{
       // Convert local filters to backend search query (q=col1:val1,col2:val2)
+      // Only include valid filters based on field type
       const filterPairs: string[] = [];
       Object.entries(localFilters).forEach(([key, val]) => {{
-        if (val) filterPairs.push(`${{key}}:${{val}}`);
+        if (val && isValidFilterValue(key, val)) {{
+          filterPairs.push(`${{key}}:${{val}}`);
+        }}
       }});
       const hasFiltersNow = filterPairs.length > 0;
       // Only trigger if we have filters now, or we had filters before (to clear them)
@@ -701,6 +751,37 @@ def _list_component(
   function showJson(v: unknown): void {{ jsonDialog = JSON.stringify(v, null, 2); }}
   function removeAccents(s: string): string {{
     return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  }}
+  function matchFilter(itemValue: unknown, filterValue: string): boolean {{
+    if (!filterValue) return true;
+
+    // Detect comparison operator
+    const match = filterValue.match(/^(>=|>|<=|<)(.*)$/);
+    if (match) {{
+      const [, op, val] = match;
+      const trimmedVal = val.trim();
+
+      // Try numeric comparison first
+      const numVal = Number(trimmedVal);
+      const numItem = Number(itemValue);
+      if (!isNaN(numVal) && !isNaN(numItem)) {{
+        if (op === '>=') return numItem >= numVal;
+        if (op === '>') return numItem > numVal;
+        if (op === '<=') return numItem <= numVal;
+        if (op === '<') return numItem < numVal;
+      }}
+
+      // Otherwise lexicographic comparison (for dates/strings)
+      const strItem = String(itemValue ?? '');
+      if (op === '>=') return strItem >= trimmedVal;
+      if (op === '>') return strItem > trimmedVal;
+      if (op === '<=') return strItem <= trimmedVal;
+      if (op === '<') return strItem < trimmedVal;
+    }}
+
+    // Normal text filter (startsWith + unaccent)
+    return removeAccents(String(itemValue ?? '').toLowerCase())
+      .startsWith(removeAccents(filterValue.toLowerCase()));
   }}
   function fmtCell(v: unknown): string {{
     if (v == null) return '';
@@ -1374,7 +1455,7 @@ class SvelteAppGenerator(StoreGenerator):
             self._write(
                 comp_dir / 'List.svelte',
                 _list_component(schema_name, table_name, stem, rname, iname,
-                                out_names, pk_info, has_post, has_del, map_key, fk_deps),
+                                out_names, pk_info, has_post, has_del, map_key, fk_deps, all_fields),
             )
             self._write(res_dir / '+page.svelte', _list_page(stem))
 
