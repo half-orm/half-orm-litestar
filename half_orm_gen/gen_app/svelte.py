@@ -57,6 +57,9 @@ _PACKAGE_JSON = """\
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch"
   }},
+  "dependencies": {{
+    "katex": "^0.16.0"
+  }},
   "devDependencies": {{
     "@sveltejs/adapter-auto": "^7.0.0",
     "@sveltejs/kit": "^2.65.2",
@@ -145,9 +148,31 @@ _APP_HTML = """\
 """
 
 _APP_CSS = """\
+@import 'katex/dist/katex.min.css';
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+"""
+
+_LATEX_TS = """\
+import katex from 'katex';
+
+export function renderLatex(raw: unknown): string {
+    const text = String(raw ?? '');
+    if (!text || (!text.includes('$') && !text.includes('\\\\('))) return escHtml(text);
+    const parts = text.split(/(\\$\\$[\\s\\S]+?\\$\\$|\\$[^$\\n]+?\\$)/g);
+    return parts.map((part, i) => {
+        if (i % 2 === 0) return escHtml(part);
+        const display = part.startsWith('$$');
+        const math = display ? part.slice(2, -2) : part.slice(1, -1);
+        return katex.renderToString(math, { displayMode: display, throwOnError: false });
+    }).join('');
+}
+
+function escHtml(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/\\n/g, '<br>');
+}
 """
 
 def _auth_store(version_prefix: str) -> str:
@@ -945,6 +970,16 @@ def _is_text_field(f: str, all_fields: dict) -> bool:
     return f in all_fields and _py_type_str(all_fields[f].py_type) == 'str'
 
 
+def _is_textarea_field(f: str, all_fields: dict) -> bool:
+    fo = all_fields.get(f)
+    if not fo:
+        return False
+    try:
+        return fo._Field__sql_type.lower().strip() == 'text'
+    except AttributeError:
+        return False
+
+
 def _is_required(f: str, all_fields: dict) -> bool:
     fo = all_fields.get(f)
     return bool(fo and fo.is_not_null() and fo.has_default_value is None)
@@ -998,6 +1033,14 @@ def _svelte_form_field(f: str, all_fields: dict, bind_prefix: str = 'form') -> s
             f'      <input id="f_{f}" type="checkbox" bind:checked={{{bind_prefix}.{f}}}\n'
             f'             class="h-4 w-4 rounded border-gray-300" />\n'
             f'      <label for="f_{f}" class="text-sm font-medium text-gray-700">{f}</label>\n'
+            f'    </div>'
+        )
+    if _is_textarea_field(f, all_fields):
+        return (
+            f'<div>\n'
+            f'      <label for="f_{f}" class="block text-sm font-medium text-gray-700 mb-1">{f}{req_mark}</label>\n'
+            f'      <textarea id="f_{f}" bind:value={{{bind_prefix}.{f}}}{req_attr}\n'
+            f'               class="w-full border rounded px-3 py-2 text-sm font-mono resize-y min-h-[1rem] [field-sizing:content]"></textarea>\n'
             f'    </div>'
         )
     return (
@@ -1089,7 +1132,13 @@ def _detail_page(
     fk_map    = {local: (rs, rt) for local, rs, rt, _ in fk_deps}
     read_only = [f for f in out_names if f != pk_field]
 
-    # Read-only fields — FK fields rendered as links
+    has_latex = any(
+        f not in fk_map and f != pk_field and f in all_fields and _field_type_category(all_fields[f]) == 'string'
+        for f in out_names
+    )
+    latex_import = "\n  import { renderLatex } from '$lib/latex.ts';" if has_latex else ''
+
+    # Read-only fields — FK fields rendered as links; string fields use LaTeX rendering
     def _ro_row(f: str) -> str:
         label = f'<span class="font-medium text-gray-600 w-36 shrink-0">{f}</span>'
         if f in fk_map:
@@ -1098,6 +1147,8 @@ def _detail_page(
                 f'<a href="/ho_bo/{rs}/{rt}/{{item.{f}}}"'
                 f' class="text-blue-500 hover:underline font-mono text-xs">{{item.{f}}}</a>'
             )
+        elif f in all_fields and _field_type_category(all_fields[f]) == 'string':
+            value = f'<span class="text-sm break-all">{{@html renderLatex(String(item.{f} ?? \'\'))}}</span>'
         else:
             value = f'<span class="text-sm break-all">{{item.{f}}}</span>'
         return f'<div class="flex gap-2 items-baseline">{label}{value}</div>'
@@ -1152,6 +1203,7 @@ def _detail_page(
             f'      const updated = await res.json();\n'
             f'      {rname}State.setItem(updated);\n'
             f'      editing = false;\n'
+            f'      document.querySelector(\'main\')?.scrollTo({{ top: 0, behavior: \'smooth\' }});\n'
             f'    }} catch (err: any) {{\n'
             f'      error = err.message;\n'
             f'    }}\n'
@@ -1314,7 +1366,7 @@ def _detail_page(
   import type {{ {iname}Out{put_in_import} }} from '$lib/generated/stores/{stem}.svelte.ts';
   import {{ goto }} from '$app/navigation';
   import {{ auth }} from '$lib/auth.svelte.ts';
-  import {{ untrack }} from 'svelte';{fk_imports}{rev_imports}
+  import {{ untrack }} from 'svelte';{latex_import}{fk_imports}{rev_imports}
 
   let {{ id }}: {{ id: string }} = $props();
   let item = $derived({rname}State.byId.get(id) ?? null);
@@ -1393,6 +1445,7 @@ class SvelteAppGenerator(StoreGenerator):
         SvelteGenerator().generate(classes, api_version, stores_dir)
 
         # --- stateRegistry + auth store + WS env var ---
+        self._write(output_dir / 'src' / 'lib' / 'latex.ts', _LATEX_TS)
         self._write(output_dir / 'src' / 'lib' / 'stateRegistry.ts',
             "const _fns: Array<() => void> = [];\n"
             "export const registerClear = (fn: () => void): void => { _fns.push(fn); };\n"
