@@ -398,7 +398,7 @@ import {{ AuthService }} from './core/auth.service';
             </nav>
             <div class="px-4 py-3 border-t">
               <a routerLink="/ho_bo">
-                <img src="logo.png" alt="halfORM" class="h-8 w-auto opacity-80 hover:opacity-100 transition-opacity" />
+                <img src="logo.png" alt="halfORM" class="h-10 w-auto opacity-80 hover:opacity-100 transition-opacity" />
               </a>
             </div>
           </aside>
@@ -474,10 +474,13 @@ import {{ RouterLink }} from '@angular/router';
     <div class="flex flex-col items-center justify-center h-full bg-gray-50 py-16">
       <div class="flex items-center gap-6 mb-6">
         <img src="logo.png" alt="halfORM" class="h-30 w-auto" />
-        <img src="angular_200x200.png" alt="Angular" class="h-20 w-auto" />
       </div>
       <h1 class="text-3xl font-bold text-gray-800 mb-2">halfORM Backoffice</h1>
-      <p class="text-gray-500 mb-8">Powered by Angular</p>
+      <p class="text-gray-500">Powered by Angular
+      </p>
+      <div class="mb-8">
+        <img src="angular_200x200.png" alt="Angular" class="h-10 w-auto" />
+      </div>
       <a [routerLink]="['/ho_bo']"
          class="bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 font-medium transition-colors">
         Open Backoffice →
