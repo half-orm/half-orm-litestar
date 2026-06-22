@@ -745,17 +745,13 @@ def _list_component(
   let isLoading = $state(false);
 
   $effect(() => {{
-    // Don't reload if we already have data (for infinite scroll)
-    if ({rname}State.items.length > 0) return;
-    const url = {rname}Api.listUrl(filters);
-    if (!auth.fetchedRoutes.has(url)) {{
-      isLoading = true;
-      {rname}Api.list(filters).then(result => {{
-        hasMore = result.has_more;
-        currentOffset = result.offset;
-        isLoading = false;
-      }});
-    }}
+    void auth.token;
+    isLoading = true;
+    {rname}Api.list(filters).then(result => {{
+      hasMore = result.has_more;
+      currentOffset = result.offset;
+      isLoading = false;
+    }});
   }});
 
   async function loadMore() {{
@@ -1119,6 +1115,59 @@ def _new_page(
 """
 
 
+def _fields_component_svelte(
+    schema_name: str, table_name: str,
+    iname: str, pk_field: str,
+    out_names: list, fk_deps: list, all_fields: dict,
+) -> str:
+    fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
+
+    has_latex = any(
+        f not in fk_map and f != pk_field and f in all_fields
+        and _field_type_category(all_fields[f]) == 'string'
+        for f in out_names
+    )
+    latex_import = "\n  import { renderLatex } from '$lib/latex.ts';" if has_latex else ''
+
+    def _ro_row(f: str) -> str:
+        label = f'<span class="font-medium text-gray-600 w-36 shrink-0">{f}</span>'
+        if f == pk_field:
+            return (
+                f'<div class="flex gap-2 items-baseline">{label}'
+                f'<span class="font-mono text-xs text-gray-500 break-all">{{item.{f}}}</span></div>'
+            )
+        if f in fk_map:
+            rs, rt = fk_map[f]
+            return (
+                f'<div class="flex gap-2 items-baseline">{label}'
+                f'<a href="/ho_bo/{rs}/{rt}/{{item.{f}}}"'
+                f' class="text-blue-500 hover:underline font-mono text-xs">{{item.{f}}}</a></div>'
+            )
+        if f in all_fields and _field_type_category(all_fields[f]) == 'string':
+            return (
+                f'<div class="flex gap-2 items-baseline">{label}'
+                f'<span class="text-sm break-all">{{@html renderLatex(String(item.{f} ?? \'\'))}}</span></div>'
+            )
+        return (
+            f'<div class="flex gap-2 items-baseline">{label}'
+            f'<span class="text-sm break-all">{{item.{f}}}</span></div>'
+        )
+
+    rows = '\n  '.join(_ro_row(f) for f in out_names)
+
+    return f"""\
+<script lang="ts">{latex_import}
+  import type {{ {iname}Out }} from '$lib/generated/stores/{schema_name}_{table_name}.svelte.ts';
+
+  let {{ item }}: {{ item: {iname}Out }} = $props();
+</script>
+
+<div class="space-y-2">
+  {rows}
+</div>
+"""
+
+
 def _detail_page(
     schema_name: str, table_name: str,
     stem: str, rname: str, iname: str,
@@ -1130,30 +1179,6 @@ def _detail_page(
 ) -> str:
     title   = _title(schema_name, table_name)
     fk_map    = {local: (rs, rt) for local, rs, rt, _ in fk_deps}
-    read_only = [f for f in out_names if f != pk_field]
-
-    has_latex = any(
-        f not in fk_map and f != pk_field and f in all_fields and _field_type_category(all_fields[f]) == 'string'
-        for f in out_names
-    )
-    latex_import = "\n  import { renderLatex } from '$lib/latex.ts';" if has_latex else ''
-
-    # Read-only fields — FK fields rendered as links; string fields use LaTeX rendering
-    def _ro_row(f: str) -> str:
-        label = f'<span class="font-medium text-gray-600 w-36 shrink-0">{f}</span>'
-        if f in fk_map:
-            rs, rt = fk_map[f]
-            value = (
-                f'<a href="/ho_bo/{rs}/{rt}/{{item.{f}}}"'
-                f' class="text-blue-500 hover:underline font-mono text-xs">{{item.{f}}}</a>'
-            )
-        elif f in all_fields and _field_type_category(all_fields[f]) == 'string':
-            value = f'<span class="text-sm break-all">{{@html renderLatex(String(item.{f} ?? \'\'))}}</span>'
-        else:
-            value = f'<span class="text-sm break-all">{{item.{f}}}</span>'
-        return f'<div class="flex gap-2 items-baseline">{label}{value}</div>'
-
-    ro_fields = '\n    '.join(_ro_row(f) for f in read_only) if read_only else ''
 
     visible_put = [f for f in put_in_names if not _is_server_generated(f, all_fields)]
 
@@ -1166,7 +1191,7 @@ def _detail_page(
     # Form state + edit toggle — populated reactively from item once loaded
     extra_script = ''
     edit_btn     = ''
-    edit_section = f'\n  <div class="space-y-2">\n    {ro_fields}\n  </div>'
+    edit_section = '\n  <Fields {item} />'
 
     if has_put and visible_put:
         empty_init  = ', '.join(
@@ -1217,9 +1242,7 @@ def _detail_page(
         edit_section = f"""
 
   {{#if !editing}}
-  <div class="space-y-2">
-    {ro_fields}
-  </div>
+  <Fields {{item}} />
   {{:else}}
   {{#if error}}<p class="text-red-600 mb-4">{{error}}</p>{{/if}}
   <form onsubmit={{handleUpdate}} class="space-y-4">
@@ -1253,7 +1276,9 @@ def _detail_page(
                 continue
             seen.add(s)
             rn = _rname(rs, rt)
+            cn = _cname(rs, rt)
             lines.append(f"  import {{ {rn}State, {rn}Api }} from '$lib/generated/stores/{s}.svelte.ts';")
+            lines.append(f"  import {cn}Fields from '$lib/generated/components/{s}/Fields.svelte';")
         return ('\n' + '\n'.join(lines)) if lines else ''
 
     def _lf_ref_name(lf: str) -> str:
@@ -1302,8 +1327,9 @@ def _detail_page(
         return ('\n' + '\n'.join(blocks)) if blocks else ''
 
     def _fk_ref_section(lf: str, rs: str, rt: str, remote_pk: str) -> str:
-        rn     = _rname(rs, rt)
-        lf_ref = _lf_ref_name(lf)
+        lf_ref    = _lf_ref_name(lf)
+        is_self   = (rs == schema_name and rt == table_name)
+        fk_fields = 'Fields' if is_self else f'{_cname(rs, rt)}Fields'
         return (
             f'\n{{#if {lf_ref}}}\n'
             f'<div class="mt-4 p-6 bg-white rounded-lg shadow">\n'
@@ -1312,14 +1338,7 @@ def _detail_page(
             f'    <a href="/ho_bo/{rs}/{rt}/{{{lf_ref}.{remote_pk}}}"'
             f' class="text-sm text-blue-600 hover:underline">→</a>\n'
             f'  </div>\n'
-            f'  <div class="space-y-1">\n'
-            f'    {{#each Object.entries({lf_ref}) as [k, v]}}\n'
-            f'      <div class="flex gap-2 items-baseline">\n'
-            f'        <span class="font-medium text-gray-600 w-36 shrink-0 text-sm">{{k}}</span>\n'
-            f'        <span class="text-sm break-all">{{String(v ?? \'\')}}</span>\n'
-            f'      </div>\n'
-            f'    {{/each}}\n'
-            f'  </div>\n'
+            f'  <{fk_fields} item={{{lf_ref}}} />\n'
             f'</div>\n'
             f'{{/if}}'
         )
@@ -1368,7 +1387,8 @@ def _detail_page(
   import type {{ {iname}Out{put_in_import} }} from '$lib/generated/stores/{stem}.svelte.ts';
   import {{ goto }} from '$app/navigation';
   import {{ auth }} from '$lib/auth.svelte.ts';
-  import {{ untrack }} from 'svelte';{latex_import}{fk_imports}{rev_imports}
+  import {{ untrack }} from 'svelte';
+  import Fields from '$lib/generated/components/{stem}/Fields.svelte';{fk_imports}{rev_imports}
 
   let {{ id }}: {{ id: string }} = $props();
   let item = $derived({rname}State.byId.get(id) ?? null);
@@ -1581,6 +1601,11 @@ class SvelteAppGenerator(StoreGenerator):
 
             # DetailView component + thin page wrapper
             if pk_info and 'GET' in crud_access:
+                self._write(
+                    comp_dir / 'Fields.svelte',
+                    _fields_component_svelte(schema_name, table_name, iname,
+                                             pk_field, out_names, fk_deps, all_fields),
+                )
                 self._write(
                     comp_dir / 'DetailView.svelte',
                     _detail_page(schema_name, table_name, stem, rname, iname,
