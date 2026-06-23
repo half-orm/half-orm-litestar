@@ -391,17 +391,17 @@ export class AuthService {{
 """
 
 
-def _app_component(resources: list) -> str:
-    nav_items_js = ',\n      '.join(
-        f'{{ href: "/ho_bo/{sn}/{tn}", label: "{_title(sn, tn)}" }}'
-        for sn, tn, *_ in resources
-    )
+def _app_component(resources: list, version_prefix: str = '') -> str:
+    api_base = version_prefix or '/api'
     return f"""\
 import {{ Component, computed, inject, OnInit, signal }} from '@angular/core';
 import {{ RouterLink, RouterLinkActive, RouterOutlet, NavigationEnd, Router }} from '@angular/router';
 import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
 import {{ AuthService }} from './core/auth.service';
+import {{ SiloRegistry }} from './generated/silo-registry.service';
+
+const API_BASE = '{api_base}';
 
 @Component({{
   selector: 'app-root',
@@ -452,19 +452,25 @@ import {{ AuthService }} from './core/auth.service';
   `
 }})
 export class AppComponent implements OnInit {{
-  protected auth   = inject(AuthService);
-  private  router  = inject(Router);
+  protected auth     = inject(AuthService);
+  protected registry = inject(SiloRegistry);
+  private   router   = inject(Router);
 
-  readonly isHome  = signal(this.router.url === '/');
+  readonly isHome   = signal(this.router.url === '/');
   navFilter = signal('');
-  readonly navItems = [
-      {nav_items_js}
-  ].sort((a, b) => a.label.localeCompare(b.label));
-  readonly filteredNav = computed(() =>
-    this.navFilter()
-      ? this.navItems.filter(i => i.label.toLowerCase().includes(this.navFilter().toLowerCase()))
-      : this.navItems
+
+  readonly navItems = computed(() =>
+    Object.keys(this.registry.meta())
+      .map(key => ({{ href: `/ho_bo/${{key}}`, label: key.replace('/', '.') }}))
+      .sort((a, b) => a.label.localeCompare(b.label))
   );
+
+  readonly filteredNav = computed(() => {{
+    const q = this.navFilter().toLowerCase();
+    return q
+      ? this.navItems().filter(i => i.label.toLowerCase().includes(q))
+      : this.navItems();
+  }});
 
   constructor() {{
     this.router.events.pipe(
@@ -474,6 +480,7 @@ export class AppComponent implements OnInit {{
   }}
 
   ngOnInit(): void {{
+    void this.registry.init(API_BASE);
     void this.auth._fetchAccess();
     this.auth.connectWs();
   }}
@@ -2054,6 +2061,16 @@ class AngularAppGenerator(StoreGenerator):
             shutil.copy2(filters_src, stores_dir / 'filters.ts')
             print(f'  {stores_dir / "filters.ts"}')
 
+        # --- shared silo files (SiloRegistry / ResourceSilo / schema types) ---
+        angular_assets = Path(__file__).parent / 'assets' / 'angular'
+        generated_dir = app_dir / 'generated'
+        generated_dir.mkdir(parents=True, exist_ok=True)
+        for fname in ('schema.types.ts', 'resource.silo.ts', 'silo-registry.service.ts'):
+            src = angular_assets / fname
+            if src.exists():
+                shutil.copy2(src, generated_dir / fname)
+                print(f'  {generated_dir / fname}')
+
         # --- static assets (served from public/ per angular.json) ---
         assets_src = package_dir / 'assets'
         public_dir = output_dir / 'public'
@@ -2070,7 +2087,7 @@ class AngularAppGenerator(StoreGenerator):
         self._write(app_dir / 'app.routes.ts',
                     _app_routes(route_meta, first_route))
         self._write(app_dir / 'app.component.ts',
-                    _app_component([(r[0], r[1]) for r in resources]))
+                    _app_component([(r[0], r[1]) for r in resources], version_prefix=version_prefix))
 
         # --- home + login + access pages ---
         self._write(app_dir / 'pages' / 'home'   / 'home.component.ts',
