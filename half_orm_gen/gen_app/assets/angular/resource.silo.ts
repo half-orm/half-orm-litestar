@@ -155,7 +155,7 @@ export class ResourceSilo {
     this.items.set([...map.values()]);
   }
 
-  private setItem(item: Row): void {
+  setItem(item: Row): void {
     if (!this.pk) return;
     const pk = this.pk;
     const id = String(item[pk]);

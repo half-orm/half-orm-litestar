@@ -593,6 +593,11 @@ import {{ AuthService }} from '../../core/auth.service';
               {{{{ role }}}}
             </button>
           }}
+          <button (click)="selectRole('ho_dev')"
+                  class="w-full text-left px-4 py-3 border border-dashed border-orange-300 rounded
+                         hover:bg-orange-50 transition-colors text-sm font-medium text-orange-600">
+            ho_dev <span class="text-xs font-normal text-orange-400">(dev super-role)</span>
+          </button>
         </div>
       }}
     </div>
@@ -960,36 +965,12 @@ def _list_component(
     title  = _title(schema_name, table_name)
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
 
-    # Store imports — deduplicated: skip self-referential FKs and multi-FK to same table
-    _seen: set[str] = {f'{schema_name}_{table_name}'}
-    _unique_fk_deps = []
-    for dep in fk_deps:
-        _, rs, rt, _ = dep
-        stem = f'{rs}_{rt}'
-        if stem not in _seen:
-            _seen.add(stem)
-            _unique_fk_deps.append(dep)
-
-    fk_imports = '\n'.join(
-        f"import {{ {_cname(rs, rt)}Store }} from '../../../generated/stores/{rs}_{rt}.store';"
-        for _, rs, rt, _ in _unique_fk_deps
-    )
-    if fk_imports:
-        fk_imports = '\n' + fk_imports
-
-    fk_injects = '\n'.join(
-        f'  private {_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store = inject({_cname(rs, rt)}Store);'
-        for _, rs, rt, _ in _unique_fk_deps
-    )
-    if fk_injects:
-        fk_injects = '\n' + fk_injects
-
     # Table headers (sortable)
     th_cols = '\n            '.join(
         f'<th (click)="sortBy(\'{f}\')"'
         f' class="px-4 py-2 text-left text-sm font-semibold text-gray-600'
         f' cursor-pointer select-none hover:bg-gray-200">'
-        f'{f} {{{{ store.sortField() === \'{f}\' ? (store.sortAsc() ? \'↑\' : \'↓\') : \'\' }}}}</th>'
+        f'{f} {{{{ silo.sortField() === \'{f}\' ? (silo.sortAsc() ? \'↑\' : \'↓\') : \'\' }}}}</th>'
         for f in out_names
     )
     action_th = '<th class="px-2 py-2 w-16"></th>' if has_del and pk_field else ''
@@ -1076,7 +1057,7 @@ def _list_component(
             f'\n  handleDelete(id: string, e: Event): void {{\n'
             f'    e.stopPropagation();\n'
             f"    if (confirm('Delete this item?')) {{\n"
-            f'      this.store.remove(id).subscribe(() => this.store.removeItem(String(id)));\n'
+            f'      this.silo.remove(id).subscribe(() => this.silo.removeItem(String(id)));\n'
             f'    }}\n'
             f'  }}'
         )
@@ -1085,7 +1066,7 @@ def _list_component(
     if pk_field:
         select_fn = (
             f'\n  selectAndNavigate(id: string): void {{\n'
-            f'    this.store.selectedId.set(id);\n'
+            f'    this.silo.selectedId.set(id);\n'
             f"    this.router.navigate(['/ho_bo/{schema_name}/{table_name}', id]);\n"
             f'  }}\n'
         )
@@ -1096,12 +1077,12 @@ def _list_component(
 
     if pk_field:
         _fk_items_src = (
-            'Array.from(this.store.byId().values()).filter(item =>\n'
+            'Array.from(this.silo.byId().values()).filter(item =>\n'
             '          Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v)))'
         )
     else:
         _fk_items_src = (
-            'this.store.items().filter(item =>\n'
+            'this.silo.items().filter(item =>\n'
             '          Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v)))'
         )
 
@@ -1118,16 +1099,16 @@ def _list_component(
     displayItems_block = f"""\
   readonly displayItems = computed(() => {{
     const hasFilters = Object.keys(this.filters).length > 0;
-    let items: {iname}Out[] = hasFilters
+    let items: Row[] = hasFilters
       ? {_fk_items_src}
-      : this.store.items();
+      : this.silo.items();
     const lf = this.localFilters();
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
-    const sf = this.store.sortField();
+    const sf = this.silo.sortField();
     if (sf) {{
-      const asc = this.store.sortAsc();
+      const asc = this.silo.sortAsc();
       items = [...items].sort((a, b) => {{
         const av = String((a as any)[sf] ?? '');
         const bv = String((b as any)[sf] ?? '');
@@ -1141,12 +1122,12 @@ def _list_component(
     router_link_imp = 'RouterLink' if needs_router_link else ''
     if pk_extractor:
         # Add type annotation to lambda parameter
-        typed_extractor = pk_extractor.replace('i =>', f'(i: {iname}Out) =>')
+        typed_extractor = pk_extractor.replace('i =>', '(i: Row) =>')
         pk_id_line = f'\n  protected getPkId = {typed_extractor};'
         highlight_attrs = (
-            '\n                [class.bg-blue-50]="store.selectedId() === getPkId(item)"\n'
-            '                [class.border-l-4]="store.selectedId() === getPkId(item)"\n'
-            '                [class.border-l-blue-500]="store.selectedId() === getPkId(item)"'
+            '\n                [class.bg-blue-50]="silo.selectedId() === getPkId(item)"\n'
+            '                [class.border-l-4]="silo.selectedId() === getPkId(item)"\n'
+            '                [class.border-l-blue-500]="silo.selectedId() === getPkId(item)"'
         )
     else:
         pk_id_line = ''
@@ -1158,11 +1139,11 @@ import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
 {router_link_es}import {{ Router, ActivatedRoute }} from '@angular/router';
 import {{ Location }} from '@angular/common';
-import {{ {iname}Store }} from '../../../generated/stores/{schema_name}_{table_name}.store';
-import type {{ {iname}Out }} from '../../../generated/stores/{schema_name}_{table_name}.store';
+import {{ SiloRegistry }} from '../../../generated/silo-registry.service';
+import type {{ Row }} from '../../../generated/resource.silo';
 import {{ AuthService }} from '../../../core/auth.service';
 import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '../../../generated/stores/filters';
-import type {{ FieldType }} from '../../../generated/stores/filters';{fk_imports}
+import type {{ FieldType }} from '../../../generated/stores/filters';
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'list')}',
@@ -1189,7 +1170,7 @@ import type {{ FieldType }} from '../../../generated/stores/filters';{fk_imports
               {td_cols}
             </tr>
           }}
-          @if (store.isLoading()) {{
+          @if (silo.isLoading()) {{
             <tr><td colspan="100" class="text-center py-4 text-gray-500">Loading...</td></tr>
           }}
         </tbody>
@@ -1212,11 +1193,11 @@ import type {{ FieldType }} from '../../../generated/stores/filters';{fk_imports
   `
 }})
 export class {iname}ListComponent {{
-  protected store  = inject({iname}Store);
+  protected silo   = inject(SiloRegistry).get('{map_key}');
   protected auth   = inject(AuthService);
   protected router = inject(Router);
   private route = inject(ActivatedRoute);
-  private location = inject(Location);{fk_injects}
+  private location = inject(Location);
   protected String = String;  // For template use
   protected Object = Object;  // For template use
   protected matchFilter = matchFilter;  // For template use
@@ -1230,7 +1211,7 @@ export class {iname}ListComponent {{
   private filterDebounceTimer?: number;
   private hadFilters = false;
 
-  @Input() filters: Partial<{iname}Out> = {{}};
+  @Input() filters: Partial<Row> = {{}};
   @Input() embedded = false;
 
   localFilters = signal<Record<string, string>>({{}});
@@ -1244,14 +1225,14 @@ export class {iname}ListComponent {{
 
     effect(() => {{
       const _token = this.auth.token();
-      this.store.list(this.filters);
+      this.silo.list(this.filters);
     }});{ws_effect}
 
     // Set up observer
     this.observer = new IntersectionObserver(
       (entries) => {{
-        if (entries[0].isIntersecting && this.store.hasMore() && !this.store.isLoading()) {{
-          this.store.loadMore(this.filters);
+        if (entries[0].isIntersecting && this.silo.hasMore() && !this.silo.isLoading()) {{
+          this.silo.loadMore(this.filters);
         }}
       }},
       {{ rootMargin: '0px 0px 400px 0px' }}
@@ -1259,7 +1240,7 @@ export class {iname}ListComponent {{
 
     // Re-observe when items change (must be in constructor for injection context)
     effect(() => {{
-      this.store.items().length;  // Track changes
+      this.silo.items().length;  // Track changes
       untracked(() => {{
         setTimeout(() => this.updateObservedElement(), 0);
       }});
@@ -1286,8 +1267,8 @@ export class {iname}ListComponent {{
   }}
 
   sortBy(f: string): void {{
-    if (this.store.sortField() === f) this.store.sortAsc.set(!this.store.sortAsc());
-    else {{ this.store.sortField.set(f); this.store.sortAsc.set(true); }}
+    if (this.silo.sortField() === f) this.silo.sortAsc.set(!this.silo.sortAsc());
+    else {{ this.silo.sortField.set(f); this.silo.sortAsc.set(true); }}
   }}
   setFilter(f: string, v: string): void {{
     const updated = {{ ...this.localFilters(), [f]: v }};
@@ -1314,9 +1295,9 @@ export class {iname}ListComponent {{
       if (hasFiltersNow || this.hadFilters) {{
         this.hadFilters = hasFiltersNow;
         // Reset pagination state and clear loaded filters cache
-        this.store.resetFilterState();
+        this.silo.resetFilterState();
         const searchParams = hasFiltersNow ? {{ q: filterPairs.join(',') }} as any : {{}};
-        this.store.list(searchParams, 0);
+        this.silo.list(searchParams, 0);
       }}
     }}, 600);
   }}
@@ -1335,10 +1316,10 @@ export class {iname}ListComponent {{
     // If URL has filters, use them (priority)
     if (Object.keys(urlFilters).length > 0) {{
       this.localFilters.set(urlFilters);
-      this.store.filters.set(urlFilters);
+      this.silo.filters.set(urlFilters);
     }} else {{
       // Otherwise, try to restore from store
-      const storeFilters = this.store.filters();
+      const storeFilters = this.silo.filters();
       if (Object.keys(storeFilters).length > 0) {{
         this.localFilters.set(storeFilters);
         // Update URL to reflect store filters
@@ -1351,7 +1332,7 @@ export class {iname}ListComponent {{
     if (this.embedded) return; // Don't sync URL for embedded components
 
     // Update store with current filters
-    this.store.filters.set(filters);
+    this.silo.filters.set(filters);
 
     const queryParams: Record<string, string> = {{}};
 
@@ -1504,16 +1485,16 @@ def _create_component(
             if optional_post_fields else ""
         )
         + null_map
-        + f"    ) as unknown as {iname}PostIn;\n"
-        "    this.store.create(payload).subscribe({"
+        + "    );\n"
+        "    this.silo.create(payload).subscribe({"
     )
 
     return f"""\
 import {{ Component, inject, signal }} from '@angular/core';
 import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router }} from '@angular/router';
-import {{ {iname}Store }} from '../../../generated/stores/{schema_name}_{table_name}.store';
-import type {{ {iname}PostIn }} from '../../../generated/stores/{schema_name}_{table_name}.store';
+import {{ SiloRegistry }} from '../../../generated/silo-registry.service';
+import type {{ Row }} from '../../../generated/resource.silo';
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'create')}',
@@ -1538,16 +1519,16 @@ import type {{ {iname}PostIn }} from '../../../generated/stores/{schema_name}_{t
   `
 }})
 export class {iname}CreateComponent {{
-  private store  = inject({iname}Store);
+  private silo   = inject(SiloRegistry).get('{schema_name}/{table_name}');
   private router = inject(Router);
 {optional_set_ts}
-  form: Partial<{iname}PostIn> = {{ {fields_ts} }};
+  form: Partial<Row> = {{ {fields_ts} }};
   readonly error = signal('');
 
   handleSubmit(): void {{
     {submit_body}
       next: (item) => {{
-        this.store.setItem(item);
+        this.silo.setItem(item);
         void this.router.navigate(['/ho_bo/{schema_name}/{table_name}']);
       }},
       error: (err: Error) => this.error.set(err.message),
@@ -1605,7 +1586,7 @@ def _fields_component(
 
     return f"""\
 import {{ Component, input }} from '@angular/core';{router_import}{latex_import}
-import type {{ {iname}Out }} from '../../stores/{schema_name}_{table_name}.store';
+import type {{ Row }} from '../../resource.silo';
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'fields')}',
@@ -1618,7 +1599,7 @@ import type {{ {iname}Out }} from '../../stores/{schema_name}_{table_name}.store
   `
 }})
 export class {iname}FieldsComponent {{
-  readonly item = input.required<{iname}Out>();
+  readonly item = input.required<Row>();
   protected String = String;
 }}
 """
@@ -1644,20 +1625,6 @@ def _detail_component(
         if stem not in _seen:
             _seen.add(stem)
             _unique_fk_deps.append(dep)
-
-    fk_store_imports = '\n'.join(
-        f"import {{ {_cname(rs, rt)}Store }} from '../../../generated/stores/{rs}_{rt}.store';"
-        for _, rs, rt, _ in _unique_fk_deps
-    )
-    if fk_store_imports:
-        fk_store_imports = '\n' + fk_store_imports
-
-    fk_injects = '\n'.join(
-        f'  protected {_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store = inject({_cname(rs, rt)}Store);'
-        for _, rs, rt, _ in _unique_fk_deps
-    )
-    if fk_injects:
-        fk_injects = '\n' + fk_injects
 
     # Reverse FK list imports
     rev_list_imports = '\n'.join(
@@ -1746,12 +1713,11 @@ def _detail_component(
       </form>
     }}"""
 
-    # FK reference sections — all deps; self-refs reuse this.store (already injected)
+    # FK reference sections — all deps; self-refs reuse this.silo (already injected)
     fk_sections = ''
     for lf, rs, rt, remote_pk in fk_deps:
-        is_self      = (rs == schema_name and rt == table_name)
-        rn_store     = 'store' if is_self else f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
-        rt_title     = _title(rs, rt)
+        fk_key   = f'{rs}/{rt}'
+        rt_title = _title(rs, rt)
         fk_fields_sel = _selector(rs, rt, 'fields')
         fk_sections += f"""
     @if (item() && item()!['{lf}']) {{
@@ -1760,8 +1726,8 @@ def _detail_component(
           <h2 class="text-lg font-semibold">{rt_title}</h2>
           <a [routerLink]="['/ho_bo/{rs}/{rt}', String(item()!['{lf}'])]" class="text-sm text-blue-600 hover:underline">→</a>
         </div>
-        @if ({rn_store}.byId().get(String(item()!['{lf}'])); as ref) {{
-          <{fk_fields_sel} [item]="ref" />
+        @if (registry.tryGet('{fk_key}')?.byId()?.get(String(item()!['{lf}'])); as ref) {{
+          <{fk_fields_sel} [item]="ref!" />
         }}
       </div>
     }}"""
@@ -1779,11 +1745,11 @@ def _detail_component(
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clip-rule="evenodd"/>
           </svg>
-          {fk_field} = {{{{ item()?.{pk_field} }}}}
+          {fk_field} = {{{{ item()?.['{pk_field}'] }}}}
         </span>
       </div>
       @if (item()) {{
-        <{_selector(rs, rt, 'list')} [filters]="{{ {fk_field}: item()!['{pk_field}'] }}" [embedded]="true" />
+        <{_selector(rs, rt, 'list')} [filters]="{{ {fk_field}: String(item()!['{pk_field}']) }}" [embedded]="true" />
       }}
     </div>"""
 
@@ -1806,10 +1772,10 @@ def _detail_component(
             f'    const putPayload = Object.fromEntries(\n'
             f'      Object.entries(this.form as unknown as Record<string, unknown>)\n'
             f'        .map(([k, v]): [string, unknown] => [k, !textFields.has(k) && v === \'\' ? null : v])\n'
-            f'    ) as unknown as {iname}PutIn;\n'
-            f'    this.store.update(this.id as any, putPayload).subscribe({{\n'
+            f'    );\n'
+            f'    this.silo.update(this.id, putPayload).subscribe({{\n'
             f'      next: (updated) => {{\n'
-            f'        this.store.setItem(updated); this.editing.set(false);\n'
+            f'        this.silo.setItem(updated); this.editing.set(false);\n'
             f'        document.querySelector(\'main\')?.scrollTo({{ top: 0, behavior: \'smooth\' }});\n'
             f'      }},\n'
             f'      error: (err: Error) => this.error.set(err.message),\n'
@@ -1826,21 +1792,22 @@ def _detail_component(
 
     fk_fetch_effects = ''
     for lf, rs, rt, remote_pk in fk_deps:
-        is_self  = (rs == schema_name and rt == table_name)
-        rn_store = 'store' if is_self else f'{_cname(rs, rt)[0].lower()}{_cname(rs, rt)[1:]}Store'
         fk_map_key = f'{rs}/{rt}'
         fk_fetch_effects += (
             f'\n    effect(() => {{\n'
-            f'      const v = this.item()?.{lf};\n'
+            f"      const v = this.item()?.['{lf}'];\n"
             f'      if (!v) return;\n'
-            f'      const url = this.{rn_store}.getUrl(String(v));\n'
-            f'      if (!this.auth.fetchedRoutes.has(url)) this.{rn_store}.get(String(v)).subscribe();\n'
+            f"      const fkSilo = this.registry.tryGet('{fk_map_key}');\n"
+            f'      if (fkSilo) {{\n'
+            f'        const url = fkSilo.getUrl(String(v));\n'
+            f'        if (!this.auth.fetchedRoutes.has(url)) fkSilo.get(String(v)).subscribe();\n'
+            f'      }}\n'
             f'    }});'
         )
     own_fields_import = f"\nimport {{ {iname}FieldsComponent }} from './fields.component';"
 
     # Add type annotation to lambda parameter
-    typed_extractor = pk_extractor.replace('i =>', f'(i: {iname}Out) =>')
+    typed_extractor = pk_extractor.replace('i =>', '(i: Row) =>')
     pk_id_line = f'\n  protected getPkId = {typed_extractor};'
 
     return f"""\
@@ -1849,9 +1816,9 @@ import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
 import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
-import {{ {iname}Store }} from '../../../generated/stores/{schema_name}_{table_name}.store';
-import type {{ {iname}Out{', ' + iname + 'PutIn' if has_put and put_in_names else ''} }} from '../../../generated/stores/{schema_name}_{table_name}.store';
-import {{ AuthService }} from '../../../core/auth.service';{own_fields_import}{fk_fields_imports}{fk_store_imports}{rev_list_imports}
+import {{ SiloRegistry }} from '../../../generated/silo-registry.service';
+import type {{ Row }} from '../../../generated/resource.silo';
+import {{ AuthService }} from '../../../core/auth.service';{own_fields_import}{fk_fields_imports}{rev_list_imports}
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'detail')}',
@@ -1878,14 +1845,15 @@ import {{ AuthService }} from '../../../core/auth.service';{own_fields_import}{f
   `
 }})
 export class {iname}DetailComponent {{
-  protected store  = inject({iname}Store);
-  protected auth   = inject(AuthService);
-  protected router = inject(Router);
-  private route    = inject(ActivatedRoute);{fk_injects}
+  protected registry = inject(SiloRegistry);
+  protected silo     = this.registry.get('{map_key}');
+  protected auth     = inject(AuthService);
+  protected router   = inject(Router);
+  private route      = inject(ActivatedRoute);
   protected String = String;  // For template use{pk_id_line}
 
   readonly id   = this.route.snapshot.params['id'] as string;
-  readonly item = computed<{iname}Out | null>(() => this.store.byId().get(this.id) ?? null);
+  readonly item = computed<Row | null>(() => this.silo.byId().get(this.id) ?? null);
 {can_edit_field}
   readonly editing = signal(false);
   readonly error   = signal('');
@@ -1894,7 +1862,7 @@ export class {iname}DetailComponent {{
   constructor() {{
     effect(() => {{
       void this.auth.token();
-      if (!this.item()) untracked(() => this.store.get(this.id as any).subscribe());
+      if (!this.item()) untracked(() => this.silo.get(this.id as any).subscribe());
     }});{form_effect}{ws_effect}{fk_fetch_effects}
   }}
 
@@ -2041,18 +2009,7 @@ class AngularAppGenerator(StoreGenerator):
 
         # --- stores ---
         stores_dir = app_dir / 'generated' / 'stores'
-        for (schema_name, table_name, map_key, iname, base_path,
-             all_fields, out_names, pk_info, pk_field, pk_ts_type, pk_extractor,
-             has_post, has_put, has_del, has_detail,
-             post_in_names, put_in_names,
-             fk_deps, rev_fk_deps,
-             optional_post_fields) in resources:
-            self._write(
-                stores_dir / f'{schema_name}_{table_name}.store.ts',
-                _store(schema_name, table_name, base_path, iname,
-                       out_names, all_fields, pk_field, pk_ts_type, pk_extractor,
-                       has_post, has_put, has_del, post_in_names, put_in_names),
-            )
+        stores_dir.mkdir(parents=True, exist_ok=True)
 
         # --- shared filters module ---
         package_dir = Path(__file__).parent.parent

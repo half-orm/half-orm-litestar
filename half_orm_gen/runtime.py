@@ -56,15 +56,23 @@ def _get_roles(request: Request) -> list[str]:
     if roles is not None:
         return roles
     token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
-    return [token] if token else ['public']
+    if token:
+        return list(dict.fromkeys([token, 'public']))  # authenticated roles inherit public
+    return ['public']
 
 
 def _get_role_filter(crud_access: dict, verb: str, authorized_roles: list[str]) -> dict:
     role_map = crud_access.get(verb, {})
     combined = {}
     for role in authorized_roles:
-        rv = role_map.get(role)
-        if isinstance(rv, dict) and 'filter' in rv:
+        if role not in role_map:
+            continue
+        rv = role_map[role]
+        if rv is None:
+            return {}  # unrestricted access for this role — no filter
+        if isinstance(rv, dict):
+            if 'filter' not in rv:
+                return {}  # dict without filter means unrestricted
             combined.update(rv['filter'])
     return combined
 
@@ -81,9 +89,11 @@ def _effective_out_fields(
     role_map = crud_access.get(verb, {})
     get_map  = crud_access.get('GET', {})
     fields: list[str] = []
+    matched = False
     for role in authorized_roles:
         if role not in role_map:
-            return None
+            continue  # role not listed — skip, don't deny
+        matched = True
         rv = role_map[role]
         if isinstance(rv, dict):
             out = rv.get('out') if 'out' in rv else (
@@ -93,8 +103,10 @@ def _effective_out_fields(
         else:
             out = rv
         if out is None:
-            return []
+            return []  # None means all fields allowed for this role
         fields.extend(out)
+    if not matched:
+        return None  # no matching role → deny
     return [f for f in dict.fromkeys(fields) if f not in api_excluded]
 
 
@@ -110,10 +122,10 @@ def _effective_in_fields(
     for role in authorized_roles:
         rv = role_map.get(role)
         if rv is None or not isinstance(rv, dict):
-            return []
+            continue  # role not authorized for this verb — skip
         in_val = rv.get('in')
         if in_val is None:
-            return []
+            return []  # None means all fields allowed
         fields.extend(in_val)
     return [f for f in dict.fromkeys(fields) if f not in api_excluded]
 
