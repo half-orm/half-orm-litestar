@@ -260,7 +260,7 @@ class TestScaffolding:
         _scaffold_api_dir(api_dir)
 
         content = (api_dir / 'guards.py').read_text()
-        assert 'async def public' in content
+        assert 'async def anonymous' in content
         assert 'async def connected' in content
 
     def test_does_not_overwrite_existing_files(self, tmp_path):
@@ -345,21 +345,21 @@ class TestGenApiHelpers:
         assert '"/v1/user/{id: uuid}"' in result
 
     def test_format_litestar_args_guards(self):
-        result = self._format_litestar_args({'path': '/items'}, ['public', 'connected'], '', None)
-        assert 'guards=[guards.public, guards.connected]' in result
+        result = self._format_litestar_args({'path': '/items'}, ['anonymous', 'connected'], '', None)
+        assert 'guards=[guards.anonymous, guards.connected]' in result
 
     def test_format_litestar_args_description(self):
         result = self._format_litestar_args({'path': '/items'}, [], 'My description.', None)
         assert 'My description.' in result
 
     def test_extract_guards_string_list(self):
-        assert self._extract_guards({'guards': ['public', 'connected']}) == ['public', 'connected']
+        assert self._extract_guards({'guards': ['anonymous', 'connected']}) == ['anonymous', 'connected']
 
     def test_extract_guards_callable_list(self):
-        def public(): pass
+        def anonymous(): pass
         def connected(): pass
 
-        assert self._extract_guards({'guards': [public, connected]}) == ['public', 'connected']
+        assert self._extract_guards({'guards': [anonymous, connected]}) == ['anonymous', 'connected']
 
     def test_extract_guards_empty(self):
         assert self._extract_guards({}) == []
@@ -388,7 +388,7 @@ class TestGenApi:
         from half_orm_gen.generate import GenApi
         from half_orm_gen import tools
 
-        @tools.api_get('/users', guards=['public'])
+        @tools.api_get('/users', guards=['anonymous'])
         async def get_users(self): pass
 
         relation = self._make_relation(
@@ -409,7 +409,7 @@ class TestGenApi:
         from half_orm_gen.generate import GenApi
         from half_orm_gen import tools
 
-        @tools.api_get('/users', guards=['public'])
+        @tools.api_get('/users', guards=['anonymous'])
         async def get_users(self): pass
 
         relation = self._make_relation(

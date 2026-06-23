@@ -8,14 +8,16 @@ class SiloRegistry {
   private _ready = false;
 
   async init(apiBase: string): Promise<void> {
+    if (this._ready) return;
     const hdrs = auth.token ? { Authorization: `Bearer ${auth.token}` } : {};
     const res = await fetch(`${apiBase}/ho_meta`, { headers: hdrs });
     if (!res.ok) return;
     const m = await res.json() as HoMeta;
     this.meta = m;
-    this.silos.clear();
     for (const [key, schema] of Object.entries(m)) {
-      this.silos.set(key, new ResourceSilo(key, schema, `${apiBase}/${key}`));
+      if (!this.silos.has(key)) {
+        this.silos.set(key, new ResourceSilo(key, schema, `${apiBase}/${key}`));
+      }
     }
     this._ready = true;
   }

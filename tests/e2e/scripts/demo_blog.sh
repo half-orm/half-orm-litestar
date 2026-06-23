@@ -143,7 +143,7 @@ PYEOF
 
 insert_crud_access "${PROJECT}/blog/author.py" \
 'CRUD_ACCESS = {
-    "GET":    {"public": ["id", "name"], "connected": ["id", "name", "email"]},
+    "GET":    {"anonymous": ["id", "name"], "connected": ["id", "name", "email"]},
     "POST":   {"connected": {"in": ["name", "email"]}},
     "PUT":    {"connected": {"in": ["name", "email"]}},
     "DELETE": {"admin": None},
@@ -152,7 +152,7 @@ insert_crud_access "${PROJECT}/blog/author.py" \
 insert_crud_access "${PROJECT}/blog/post.py" \
 'CRUD_ACCESS = {
     "GET":    {
-        "public":    {"out": ["id", "title", "published", "author_id"], "filter": {"published": True}},
+        "anonymous":    {"out": ["id", "title", "published", "author_id"], "filter": {"published": True}},
         "connected": None,
     },
     "POST":   {"connected": {"in": ["title", "content", "author_id"]}},
@@ -162,14 +162,14 @@ insert_crud_access "${PROJECT}/blog/post.py" \
 
 insert_crud_access "${PROJECT}/blog/comment.py" \
 'CRUD_ACCESS = {
-    "GET":    {"public": ["id", "content", "post_id", "author_id", "comment_type"]},
+    "GET":    {"anonymous": ["id", "content", "post_id", "author_id", "comment_type"]},
     "POST":   {"connected": {"in": ["content", "post_id", "author_id", "comment_type"]}},
     "DELETE": {"admin": None},
 }'
 
 insert_crud_access "${PROJECT}/blog/comment_type.py" \
 'CRUD_ACCESS = {
-    "GET": {"public": None},
+    "GET": {"anonymous": None},
 }'
 
 echo -e "${GREEN}✓ CRUD_ACCESS added${NC}"

@@ -24,7 +24,7 @@ pair is in the module docstring as an example):
 API_EXCLUDED_FIELDS = ["passwd_hash"]   # optional — see below
 
 CRUD_ACCESS = {
-    "GET":    {"public": ["id", "title", "published"], "connected": None},
+    "GET":    {"anonymous": ["id", "title", "published"], "connected": None},
     "POST":   {"connected": {"in": ["title", "content", "author_id"]}},
     "PUT":    {"connected": {"in": ["title", "content", "published"]}},
     "DELETE": {"admin": None},
@@ -47,7 +47,7 @@ for all fields):
 
 ```python
 "GET": {
-    "public":    ["id", "name", "email"],   # only these fields returned
+    "anonymous":    ["id", "name", "email"],   # only these fields returned
     "connected": None,                       # all fields returned
 }
 
@@ -113,16 +113,16 @@ tokens, audit columns managed by triggers, etc.).
 API_EXCLUDED_FIELDS = ["passwd_hash"]
 
 CRUD_ACCESS = {
-    # Unauthenticated users see a limited public profile.
+    # Unauthenticated users see a limited anonymous profile.
     # Authenticated users see everything except the excluded hash.
     "GET": {
-        "public":    ["id", "name", "email"],
+        "anonymous":    ["id", "name", "email"],
         "connected": None,
     },
 
     # Creating an account: accept passwd, never return it.
     "POST": {
-        "public": {
+        "anonymous": {
             "in":  ["name", "email", "passwd"],
             "out": ["id", "name", "email"],
         }
@@ -149,7 +149,7 @@ Three kinds of roles can appear in `CRUD_ACCESS`:
 
 | Role | Meaning |
 |------|---------|
-| `"public"` | No authentication required. |
+| `"anonymous"` | No authentication required. |
 | `"connected"` | Any authenticated user. |
 | `"<name>"` | A domain role defined in `api/roles/<name>.py`. |
 
@@ -216,7 +216,7 @@ generated. For views, only `GET` routes are generated regardless of what
 
 A `GET /vN/ho_access` route is always generated alongside the CRUD routes.
 It returns the access control map **filtered to the caller's active roles**:
-anonymous users get only `public` entries, authenticated users get `public` +
+anonymous users get only `anonymous` entries, authenticated users get `anonymous` +
 `connected` + their domain roles. The field lists are the union across all
 active roles, with `out` inheritance resolved and `API_EXCLUDED_FIELDS` applied.
 
@@ -250,7 +250,7 @@ GET /v0/ho_access        # connected caller
 }
 ```
 
-This endpoint is `public` and is the primary tool for frontends to resolve
+This endpoint is `anonymous` and is the primary tool for frontends to resolve
 action buttons and field visibility per user profile, without multiplying pages.
 
 ---
@@ -271,7 +271,7 @@ for that verb. The format reflects the `in`/`out` distinction:
 **GET** (sugar form):
 ```
 **Access**
-- public: id, name, email
+- anonymous: id, name, email
 - connected: all fields
 ```
 

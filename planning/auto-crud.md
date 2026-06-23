@@ -110,7 +110,7 @@ Les handlers utilisent directement `ho_typeddicts.PublicNodeDict` en entrée et 
 Le handler généré expose tout via query params :
 
 ```python
-@get("/v0/public/node")
+@get("/v0/anonymous/node")
 async def _auto_public_node_list(
     # filtres (un par colonne, générés depuis _ho_fields)
     id: Optional[int] = None,
@@ -162,11 +162,11 @@ Les rôles sont définis dans un **répertoire** `api/roles/`, un module par rô
 async def authorize(path_params: dict, jwt_payload: ProxyJWTPayload) -> bool
 ```
 
-La chaîne de base obligatoire : `public → connected → rôle spécifique`
+La chaîne de base obligatoire : `anonymous → connected → rôle spécifique`
 
-Les rôles `public` et `connected` sont des **cas spéciaux** gérés directement dans le checker d'autorisation (pas besoin de module) :
+Les rôles `anonymous` et `connected` sont des **cas spéciaux** gérés directement dans le checker d'autorisation (pas besoin de module) :
 
-- `public` → toujours `True`
+- `anonymous` → toujours `True`
 - `connected` → `True` si `jwt_payload.user_id` est présent, sinon `False` (court-circuit : inutile de vérifier les rôles spécifiques)
 
 Pour les autres rôles, le checker charge dynamiquement `api.roles.{role_name}` et appelle `authorize()`.
@@ -215,7 +215,7 @@ Un rôle peut aussi faire des vérifications par ligne (row-level) :
 from half_orm.relation_errors import MultipleRowsError, NotFoundError
 from api.roles.core import authorize_and
 from api.schemas.jwt import ProxyJWTPayload
-from mydb.public.project import Project
+from mydb.anonymous.project import Project
 
 @authorize_and("connected")   # doit d'abord être connecté
 async def authorize(path_params: dict, jwt_payload: ProxyJWTPayload) -> bool:
@@ -239,7 +239,7 @@ async def _check_route_authorization(
 ) -> bool:
     route_role_names = cls.__route_role_names.get((method, route_path), [])
 
-    if "public" in route_role_names:
+    if "anonymous" in route_role_names:
         return True
 
     if "connected" in route_role_names:
@@ -261,7 +261,7 @@ async def _check_route_authorization(
 Plutôt qu'un fichier central `crud_access.py`, les accès sont définis **dans l'espace développeur** de chaque module généré par `half-orm-dev`. Ces espaces sont préservés lors des régénérations.
 
 ```python
-# mydb/public/node.py  (généré par half-orm-dev, espace dev préservé)
+# mydb/anonymous/node.py  (généré par half-orm-dev, espace dev préservé)
 
 from mydb.ho_baseclasses import HoPublicNode
 
@@ -269,7 +269,7 @@ from mydb.ho_baseclasses import HoPublicNode
 
 CRUD_ACCESS = {
     "GET": {
-        "public":    ["id", "name", "type"],
+        "anonymous":    ["id", "name", "type"],
         "membre":    ["id", "name", "type", "level", "infoid"],
         "permanent": None,   # None = tous les champs
         "admin":     None,
@@ -303,7 +303,7 @@ class Node(HoPublicNode):
 
 Le middleware réalise deux étapes distinctes :
 
-**Étape 1 — autorisation de la route** (`_check_route_authorization`) : retourne True/False. Peut court-circuiter sur `public` (toujours True) ou `connected` (True si authentifié, sinon False sans évaluer les rôles domaine).
+**Étape 1 — autorisation de la route** (`_check_route_authorization`) : retourne True/False. Peut court-circuiter sur `anonymous` (toujours True) ou `connected` (True si authentifié, sinon False sans évaluer les rôles domaine).
 
 **Étape 2 — calcul des rôles autorisés** : évalue **tous** les rôles déclarés pour l'opération et collecte ceux qui retournent True. Stocké dans `request.state.authorized_roles` pour usage dans le handler.
 
@@ -313,7 +313,7 @@ async def _compute_authorized_roles(cls, verb, module_crud_access, request_like,
     role_access = module_crud_access.get(verb, {})
     authorized = []
     for role_name in role_access:
-        if role_name == "public":
+        if role_name == "anonymous":
             authorized.append(role_name)
         elif role_name == "connected":
             if jwt_payload.user_id:
@@ -334,7 +334,7 @@ Le handler calcule l'**union des champs** de tous les rôles autorisés :
 
 ```python
 # Dans le handler généré
-@get("/v0/public/node")
+@get("/v0/anonymous/node")
 async def _auto_public_node_list(request: Request, ...) -> list[ho_typeddicts.PublicNodeDict]:
     authorized = request.state.authorized_roles
     role_fields = public_node.CRUD_ACCESS["GET"]
@@ -347,7 +347,7 @@ async def _auto_public_node_list(request: Request, ...) -> list[ho_typeddicts.Pu
 
 Propriétés :
 - **Order-independent** : l'union est commutative, l'ordre de déclaration ne compte pas
-- **Additif** : `public` + `membre` → union des champs des deux rôles (un membre voit tout ce que public voit + ses champs supplémentaires)
+- **Additif** : `anonymous` + `membre` → union des champs des deux rôles (un membre voit tout ce que anonymous voit + ses champs supplémentaires)
 - **Sûr** : si `authorized_roles` est vide → le guard a déjà refusé en amont (HTTP 403)
 
 ### 6. Cycle de vie
@@ -360,13 +360,13 @@ Propriétés :
 
 ## Structure du code généré (esquisse)
 
-L'exemple ci-dessous montre ce que `half_orm litestar generate` produit pour la relation `public.node` (table, PK simple `id: int`).
+L'exemple ci-dessous montre ce que `half_orm litestar generate` produit pour la relation `anonymous.node` (table, PK simple `id: int`).
 
 ```python
 # Extrait de api/app.py — généré, ne pas éditer
 
 from jdmml import ho_typeddicts
-from jdmml.public import node as public_node
+from jdmml.anonymous import node as public_node
 from api import crud_access
 
 
@@ -389,8 +389,8 @@ def _writable_fields(data: dict, relation: str, verb: str, authorized_roles: lis
     return {k: v for k, v in data.items() if k in allowed}
 
 
-# GET /v0/public/node — liste avec filtres, projection client et pagination
-@get("/v0/public/node")
+# GET /v0/anonymous/node — liste avec filtres, projection client et pagination
+@get("/v0/anonymous/node")
 async def _auto_public_node_list(
     request: Request,
     id: Optional[int] = None,
@@ -401,7 +401,7 @@ async def _auto_public_node_list(
     offset: Optional[int] = None,
 ) -> list[ho_typeddicts.PublicNodeDict]:
     filter_kwargs = {k: v for k, v in {'id': id, 'name': name, 'type': type}.items() if v is not None}
-    authorized = _effective_fields("public.node", "GET", request.state.authorized_roles)
+    authorized = _effective_fields("anonymous.node", "GET", request.state.authorized_roles)
     if fields:
         # intersection : ce que le client demande ∩ ce que son rôle autorise
         projection = [f for f in fields if not authorized or f in authorized]
@@ -414,46 +414,46 @@ async def _auto_public_node_list(
     ]
 
 
-# GET /v0/public/node/{id} — enregistrement unique par PK
-@get("/v0/public/node/{id: int}")
+# GET /v0/anonymous/node/{id} — enregistrement unique par PK
+@get("/v0/anonymous/node/{id: int}")
 async def _auto_public_node_get(
     request: Request,
     id: int,
 ) -> ho_typeddicts.PublicNodeDict:
-    authorized = _effective_fields("public.node", "GET", request.state.authorized_roles)
+    authorized = _effective_fields("anonymous.node", "GET", request.state.authorized_roles)
     rows = [row async for row in public_node.Node(id=id).ho_aselect(*authorized)]
     if not rows:
         raise HTTPException(status_code=404)
     return rows[0]
 
 
-# POST /v0/public/node — création
-@post("/v0/public/node")
+# POST /v0/anonymous/node — création
+@post("/v0/anonymous/node")
 async def _auto_public_node_create(
     request: Request,
     data: ho_typeddicts.PublicNodeDict,
 ) -> ho_typeddicts.PublicNodeDict:
-    writable = _writable_fields(dict(data), "public.node", "POST", request.state.authorized_roles)
+    writable = _writable_fields(dict(data), "anonymous.node", "POST", request.state.authorized_roles)
     return await public_node.Node(**writable).ho_ainsert()
 
 
-# PUT /v0/public/node/{id} — mise à jour partielle
-@put("/v0/public/node/{id: int}")
+# PUT /v0/anonymous/node/{id} — mise à jour partielle
+@put("/v0/anonymous/node/{id: int}")
 async def _auto_public_node_update(
     request: Request,
     id: int,
     data: ho_typeddicts.PublicNodeDict,
 ) -> ho_typeddicts.PublicNodeDict:
     payload = {k: v for k, v in dict(data).items() if v is not None}
-    writable = _writable_fields(payload, "public.node", "PUT", request.state.authorized_roles)
+    writable = _writable_fields(payload, "anonymous.node", "PUT", request.state.authorized_roles)
     result = await public_node.Node(id=id).ho_aupdate(**writable)
     if not result:
         raise HTTPException(status_code=404)
     return result[0]
 
 
-# DELETE /v0/public/node/{id} — suppression
-@delete("/v0/public/node/{id: int}")
+# DELETE /v0/anonymous/node/{id} — suppression
+@delete("/v0/anonymous/node/{id: int}")
 async def _auto_public_node_delete(
     request: Request,
     id: int,

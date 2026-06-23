@@ -408,14 +408,47 @@ const API_BASE = '{api_base}';
   standalone: true,
   imports: [RouterOutlet, RouterLink, RouterLinkActive],
   template: `
-    <div class="h-screen flex flex-col bg-gray-50 overflow-hidden">
+    <div class="h-screen flex flex-col bg-gray-50 overflow-hidden" (click)="closeMenu($event)">
       @if (!isHome()) {{
         <header class="shrink-0 bg-white border-b h-11 flex items-center justify-between px-4">
           <span class="font-bold text-gray-800">halfORM Backoffice</span>
-          <a routerLink="/ho_bo"
-             class="text-xs px-3 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
-            {{{{ auth.token() ?? 'public' }}}}
-          </a>
+          <div class="relative">
+            <button (click)="menuOpen = !menuOpen; $event.stopPropagation()"
+                    [class]="'flex items-center gap-1 text-xs px-3 py-1 rounded-full border transition-colors ' +
+                             (auth.token() ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                                          : 'border-gray-300 text-gray-500 hover:bg-gray-50')">
+              {{{{ auth.token() ?? 'anonymous' }}}}
+              <span class="opacity-60">{{{{ menuOpen ? '▲' : '▼' }}}}</span>
+            </button>
+            @if (menuOpen) {{
+              <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 min-w-44 py-1">
+                @if (roles().length === 0) {{
+                  <p class="px-4 py-2 text-xs text-gray-400">Loading…</p>
+                }} @else {{
+                  @for (role of roles(); track role) {{
+                    <button (click)="selectRole(role)"
+                            [class]="'w-full text-left px-4 py-2 text-xs hover:bg-blue-50 transition-colors ' +
+                                     (auth.token() === role ? 'font-semibold text-blue-600' : 'text-gray-700')">
+                      {{{{ role }}}}
+                    </button>
+                  }}
+                }}
+                <div class="mx-3 my-1 border-t border-dashed border-orange-200"></div>
+                <button (click)="selectRole('ho_dev')"
+                        [class]="'w-full text-left px-4 py-2 text-xs text-orange-600 hover:bg-orange-50 transition-colors ' +
+                                 (auth.token() === 'ho_dev' ? 'font-semibold' : '')">
+                  ho_dev <span class="opacity-60 text-xs">(dev)</span>
+                </button>
+                @if (auth.token()) {{
+                  <div class="mx-3 my-1 border-t border-gray-100"></div>
+                  <button (click)="logout()"
+                          class="w-full text-left px-4 py-2 text-xs text-gray-400 hover:bg-gray-50 transition-colors">
+                    Sign out
+                  </button>
+                }}
+              </div>
+            }}
+          </div>
         </header>
         <div class="flex flex-1 overflow-hidden">
           <aside class="w-56 shrink-0 bg-white border-r flex flex-col">
@@ -434,7 +467,7 @@ const API_BASE = '{api_base}';
             </nav>
             <div class="px-4 py-3 border-t">
               <a routerLink="/">
-                <img src="logo.png" alt="halfORM" class="h-10 w-auto opacity-80 hover:opacity-100 transition-opacity" />
+                <img src="/logo.png" alt="halfORM" class="h-10 w-auto opacity-80 hover:opacity-100 transition-opacity" />
               </a>
             </div>
           </aside>
@@ -458,6 +491,8 @@ export class AppComponent implements OnInit {{
 
   readonly isHome   = signal(this.router.url === '/');
   navFilter = signal('');
+  menuOpen  = false;
+  readonly roles = signal<string[]>([]);
 
   readonly navItems = computed(() =>
     Object.keys(this.registry.meta())
@@ -480,9 +515,30 @@ export class AppComponent implements OnInit {{
   }}
 
   ngOnInit(): void {{
+    this.menuOpen = !this.auth.token();
     void this.registry.init(API_BASE);
     void this.auth._fetchAccess();
     this.auth.connectWs();
+    fetch(`${{API_BASE}}/ho_roles`)
+      .then(r => r.ok ? r.json() : [])
+      .then((d: string[]) => this.roles.set(d));
+  }}
+
+  selectRole(role: string): void {{
+    this.auth.login(role);
+    this.menuOpen = false;
+  }}
+
+  logout(): void {{
+    this.auth.logout();
+    this.menuOpen = true;
+    void this.router.navigate(['/']);
+  }}
+
+  closeMenu(e: MouseEvent): void {{
+    if (this.menuOpen && !(e.target as HTMLElement).closest('.relative')) {{
+      this.menuOpen = false;
+    }}
   }}
 }}
 """
@@ -538,7 +594,6 @@ export class HomeComponent {{}}
 def _app_routes(resources: list, first_route: str) -> str:
     lines = [
         "import { Routes } from '@angular/router';",
-        "import { authGuard } from './core/auth.guard';",
         '',
         'export const routes: Routes = [',
         "  { path: '', loadComponent: () => import('./pages/home/home.component').then(m => m.HomeComponent) },",
@@ -551,78 +606,42 @@ def _app_routes(resources: list, first_route: str) -> str:
         stem = f'{sn}_{tn}'
         base = f'./generated/components/{stem}'
         lines.append(
-            f"  {{ path: 'ho_bo/{sn}/{tn}', canActivate: [authGuard], loadComponent: () => import('{base}/list.component').then(m => m.{cn}ListComponent) }},"
+            f"  {{ path: 'ho_bo/{sn}/{tn}', loadComponent: () => import('{base}/list.component').then(m => m.{cn}ListComponent) }},"
         )
         if has_post:
             lines.append(
-                f"  {{ path: 'ho_bo/{sn}/{tn}/new', canActivate: [authGuard], loadComponent: () => import('{base}/create.component').then(m => m.{cn}CreateComponent) }},"
+                f"  {{ path: 'ho_bo/{sn}/{tn}/new', loadComponent: () => import('{base}/create.component').then(m => m.{cn}CreateComponent) }},"
             )
         if pk_info:
             lines.append(
-                f"  {{ path: 'ho_bo/{sn}/{tn}/:id', canActivate: [authGuard], loadComponent: () => import('{base}/detail.component').then(m => m.{cn}DetailComponent) }},"
+                f"  {{ path: 'ho_bo/{sn}/{tn}/:id', loadComponent: () => import('{base}/detail.component').then(m => m.{cn}DetailComponent) }},"
             )
     lines += ['];', '']
     return '\n'.join(lines)
 
 
 def _login_component(version_prefix: str) -> str:
-    return f"""\
-import {{ Component, inject, OnInit, signal }} from '@angular/core';
-import {{ Router }} from '@angular/router';
-import {{ AuthService }} from '../../core/auth.service';
+    return """\
+import { Component, inject } from '@angular/core';
+import { AuthService } from '../../core/auth.service';
 
-@Component({{
+@Component({
   selector: 'app-login',
   standalone: true,
   template: `
-    <div class="max-w-sm mx-auto mt-16 p-6 bg-white rounded-lg shadow">
-      <h1 class="text-xl font-bold mb-2">Select a role</h1>
-      <p class="text-xs text-gray-400 mb-6">Dev mode — the role name is used as bearer token.</p>
-      @if (loading()) {{
-        <p class="text-gray-400 text-sm">Loading roles…</p>
-      }} @else if (error()) {{
-        <p class="text-red-500 text-sm">{{{{ error() }}}}</p>
-      }} @else if (roles().length === 0) {{
-        <p class="text-gray-500 text-sm">No roles found.</p>
-      }} @else {{
-        <div class="space-y-2">
-          @for (role of roles(); track role) {{
-            <button (click)="selectRole(role)"
-                    class="w-full text-left px-4 py-3 border rounded hover:bg-blue-50
-                           hover:border-blue-300 transition-colors text-sm font-medium">
-              {{{{ role }}}}
-            </button>
-          }}
-          <button (click)="selectRole('ho_dev')"
-                  class="w-full text-left px-4 py-3 border border-dashed border-orange-300 rounded
-                         hover:bg-orange-50 transition-colors text-sm font-medium text-orange-600">
-            ho_dev <span class="text-xs font-normal text-orange-400">(dev super-role)</span>
-          </button>
-        </div>
-      }}
+    <div class="flex flex-col items-center justify-center h-full text-gray-400 text-sm gap-2">
+      @if (auth.token()) {
+        <p>Logged in as <span class="font-semibold text-gray-700">{{ auth.token() }}</span></p>
+        <p>Select a resource from the sidebar.</p>
+      } @else {
+        <p>Select a role using the button in the top right corner.</p>
+      }
     </div>
   `
-}})
-export class LoginComponent implements OnInit {{
-  private auth   = inject(AuthService);
-  private router = inject(Router);
-
-  readonly roles   = signal<string[]>([]);
-  readonly loading = signal(true);
-  readonly error   = signal('');
-
-  ngOnInit(): void {{
-    fetch('{version_prefix}/ho_roles')
-      .then(r => {{ if (!r.ok) throw new Error(r.statusText); return r.json(); }})
-      .then((d: string[]) => {{ this.roles.set(d); this.loading.set(false); }})
-      .catch((e: Error) => {{ this.error.set(e.message); this.loading.set(false); }});
-  }}
-
-  selectRole(role: string): void {{
-    this.auth.login(role);
-    void this.router.navigate(['/ho_bo']);
-  }}
-}}
+})
+export class LoginComponent {
+  protected auth = inject(AuthService);
+}
 """
 
 
@@ -709,7 +728,7 @@ export class AccessComponent implements OnInit {{
 
   readonly roles        = signal<string[]>([]);
   readonly rolesLoading = signal(true);
-  readonly activeRole   = computed(() => this.auth.token() ?? 'public');
+  readonly activeRole   = computed(() => this.auth.token() ?? 'anonymous');
   readonly accessEntries = computed(() => Object.entries(this.auth.access()));
 
   ngOnInit(): void {{
@@ -719,7 +738,7 @@ export class AccessComponent implements OnInit {{
   }}
 
   selectRole(role: string): void {{
-    if (role === 'public') this.auth.logout();
+    if (role === 'anonymous') this.auth.logout();
     else this.auth.login(role);
   }}
 

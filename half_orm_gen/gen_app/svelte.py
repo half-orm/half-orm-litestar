@@ -202,13 +202,7 @@ class AuthState {{
         this.token = null;
         this.fetchedRoutes = new Set();
         clearAllStates();
-
-        // Clear filter query params on logout
-        if (typeof window !== 'undefined' && window.location.search.includes('f_')) {{
-            const currentPath = window.location.pathname;
-            goto(currentPath, {{ replaceState: true }});
-        }}
-
+        if (typeof window !== 'undefined') goto('/');
         this._fetchAccess();
     }}
 
@@ -245,55 +239,18 @@ if (typeof window !== 'undefined') {{
 """
 
 def _login_page(version_prefix: str) -> str:
-    return f"""\
+    return """\
 <script lang="ts">
-  import {{ auth }} from '$lib/auth.svelte.ts';
-  import {{ goto }} from '$app/navigation';
-  import {{ onMount }} from 'svelte';
-
-  let roles   = $state<string[]>([]);
-  let loading = $state(true);
-  let error   = $state('');
-
-  onMount(() => {{
-    fetch('{version_prefix}/ho_roles')
-      .then(r => {{ if (!r.ok) throw new Error(r.statusText); return r.json(); }})
-      .then(d  => {{ roles = d; loading = false; }})
-      .catch(e => {{ error = e.message; loading = false; }});
-  }});
-
-  function selectRole(role: string) {{
-    auth.login(role);
-    goto('/ho_bo');
-  }}
+  import { auth } from '$lib/auth.svelte.ts';
 </script>
 
-<div class="max-w-sm mx-auto mt-16 p-6 bg-white rounded-lg shadow">
-  <h1 class="text-xl font-bold mb-2">Select a role</h1>
-  <p class="text-xs text-gray-400 mb-6">Dev mode — the role name is used as bearer token.</p>
-
-  {{#if loading}}
-    <p class="text-gray-400 text-sm">Loading roles…</p>
-  {{:else if error}}
-    <p class="text-red-500 text-sm">{{error}}</p>
-  {{:else if roles.length === 0}}
-    <p class="text-gray-500 text-sm">No roles found.</p>
-  {{:else}}
-    <div class="space-y-2">
-      {{#each roles as role}}
-        <button onclick={{() => selectRole(role)}}
-                class="w-full text-left px-4 py-3 border rounded hover:bg-blue-50
-                       hover:border-blue-300 transition-colors text-sm font-medium">
-          {{role}}
-        </button>
-      {{/each}}
-      <button onclick={{() => selectRole('ho_dev')}}
-              class="w-full text-left px-4 py-3 border border-dashed border-orange-300 rounded
-                     hover:bg-orange-50 transition-colors text-sm font-medium text-orange-600">
-        ho_dev <span class="text-xs font-normal text-orange-400">(dev super-role)</span>
-      </button>
-    </div>
-  {{/if}}
+<div class="flex flex-col items-center justify-center h-full text-gray-400 text-sm gap-2">
+  {#if auth.token}
+    <p>Logged in as <span class="font-semibold text-gray-700">{auth.token}</span></p>
+    <p>Select a resource from the sidebar.</p>
+  {:else}
+    <p>Select a role using the button in the top right corner.</p>
+  {/if}
 </div>
 """
 
@@ -327,7 +284,7 @@ def _access_page(version_prefix: str) -> str:
   let roles        = $state<string[]>([]);
   let rolesLoading = $state(true);
 
-  const activeRole = $derived(auth.token ?? 'public');
+  const activeRole = $derived(auth.token ?? 'anonymous');
 
   onMount(() => {{
     fetch('{version_prefix}/ho_roles')
@@ -336,7 +293,7 @@ def _access_page(version_prefix: str) -> str:
   }});
 
   function selectRole(role: string) {{
-    if (role === 'public') auth.logout();
+    if (role === 'anonymous') auth.logout();
     else auth.login(role);
   }}
 
@@ -426,14 +383,28 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   import '../../app.css';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
+  import {{ onMount }} from 'svelte';
 
   let {{ children }} = $props();
-  let navFilter = $state('');
+  let navFilter  = $state('');
+  let roles      = $state<string[]>([]);
+  let menuOpen   = $state(!auth.token);
 
-  $effect(() => {{
-    void auth.token;
-    void registry.init('{version_prefix}');
+  onMount(() => {{
+    fetch('{version_prefix}/ho_roles')
+      .then(r => r.ok ? r.json() : [])
+      .then((d: string[]) => {{ roles = d; }});
   }});
+
+  function selectRole(role: string) {{
+    auth.login(role);
+    menuOpen = false;
+  }}
+
+  function logout() {{
+    auth.logout();
+    menuOpen = true;
+  }}
 
   const navItems = [
     {nav_items_js}
@@ -445,13 +416,50 @@ def _layout(resources: list, version_prefix: str = '') -> str:
   );
 </script>
 
-<div class="h-screen flex flex-col bg-gray-50 overflow-hidden">
+<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+<div class="h-screen flex flex-col bg-gray-50 overflow-hidden"
+     onclick={{(e) => {{ if (menuOpen && !(e.target as HTMLElement).closest('.role-menu')) menuOpen = false; }}}}
+     onkeydown={{(e) => {{ if (e.key === 'Escape') menuOpen = false; }}}}
+     role="presentation">
   <header class="shrink-0 bg-white border-b h-11 flex items-center justify-between px-4">
     <span class="font-bold text-gray-800">halfORM Backoffice</span>
-    <a href="/ho_bo"
-       class="text-xs px-3 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors">
-      {{auth.token ?? 'public'}}
-    </a>
+    <div class="relative role-menu">
+      <button onclick={{(e) => {{ e.stopPropagation(); menuOpen = !menuOpen; }}}}
+              class="flex items-center gap-1 text-xs px-3 py-1 rounded-full border
+                     {{auth.token ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100' : 'border-gray-300 text-gray-500 hover:bg-gray-50'}}
+                     transition-colors">
+        {{auth.token ?? 'anonymous'}}
+        <span class="opacity-60">{{menuOpen ? '▲' : '▼'}}</span>
+      </button>
+      {{#if menuOpen}}
+        <div class="absolute right-0 top-full mt-1 bg-white border rounded-lg shadow-lg z-50 min-w-44 py-1">
+          {{#if roles.length === 0}}
+            <p class="px-4 py-2 text-xs text-gray-400">Loading…</p>
+          {{:else}}
+            {{#each roles as role}}
+              <button onclick={{() => selectRole(role)}}
+                      class="w-full text-left px-4 py-2 text-xs hover:bg-blue-50 transition-colors
+                             {{auth.token === role ? 'font-semibold text-blue-600' : 'text-gray-700'}}">
+                {{role}}
+              </button>
+            {{/each}}
+          {{/if}}
+          <div class="mx-3 my-1 border-t border-dashed border-orange-200"></div>
+          <button onclick={{() => selectRole('ho_dev')}}
+                  class="w-full text-left px-4 py-2 text-xs text-orange-600 hover:bg-orange-50 transition-colors
+                         {{auth.token === 'ho_dev' ? 'font-semibold' : ''}}">
+            ho_dev <span class="opacity-60">(dev)</span>
+          </button>
+          {{#if auth.token}}
+            <div class="mx-3 my-1 border-t border-gray-100"></div>
+            <button onclick={{logout}}
+                    class="w-full text-left px-4 py-2 text-xs text-gray-400 hover:bg-gray-50 transition-colors">
+              Sign out
+            </button>
+          {{/if}}
+        </div>
+      {{/if}}
+    </div>
   </header>
   <div class="flex flex-1 overflow-hidden">
     <aside class="w-56 shrink-0 bg-white border-r flex flex-col">
@@ -911,18 +919,10 @@ def _list_page(stem: str) -> str:
 def _admin_layout() -> str:
     return """\
 <script lang="ts">
-  import { auth } from '$lib/auth.svelte.ts';
-  import { goto } from '$app/navigation';
-  import { page } from '$app/state';
-
   let { children } = $props();
-
-  $effect(() => {
-    if (!auth.token && page.url.pathname !== '/ho_bo') goto('/ho_bo');
-  });
 </script>
 
-{#if auth.token || page.url.pathname === '/ho_bo'}{@render children()}{/if}
+{@render children()}
 """
 
 
@@ -1551,6 +1551,15 @@ class SvelteAppGenerator(StoreGenerator):
         # (nav) group provides the sidebar layout for all other pages
         self._write(routes_dir / '(nav)' / '+layout.svelte', _layout(resources, version_prefix))
         self._write(routes_dir / '(nav)' / 'ho_bo' / '+layout.svelte', _admin_layout())
+        # +layout.ts ensures registry.init() completes before any component renders
+        self._write(routes_dir / '(nav)' / '+layout.ts',
+                    f"import {{ browser }} from '$app/environment';\n"
+                    f"import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';\n\n"
+                    f"export const ssr = false;\n\n"
+                    f"export async function load() {{\n"
+                    f"  if (browser) await registry.init('{version_prefix}');\n"
+                    f"  return {{}};\n"
+                    f"}}\n")
         first_route = (
             f'/ho_bo/{resources[0][0]}/{resources[0][1]}' if resources else '/ho_bo'
         )

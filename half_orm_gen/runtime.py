@@ -57,8 +57,8 @@ def _get_roles(request: Request) -> list[str]:
         return roles
     token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
     if token:
-        return list(dict.fromkeys([token, 'public']))  # authenticated roles inherit public
-    return ['public']
+        return list(dict.fromkeys([token, 'anonymous']))  # authenticated roles inherit anonymous
+    return ['anonymous']
 
 
 def _get_role_filter(crud_access: dict, verb: str, authorized_roles: list[str]) -> dict:
@@ -648,7 +648,7 @@ def build_crud_app(
                 _make_delete_handler(path, cls, crud_access, api_excluded, pk_info, resource, ws_rmap)
             )
 
-    roles_list = sorted(roles_set - {'ho_dev'})
+    roles_list = sorted(roles_set - {'ho_dev', 'anonymous'})
 
     special_handlers = [
         _make_ho_meta(model, prefix),

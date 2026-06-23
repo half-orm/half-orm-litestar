@@ -293,7 +293,7 @@ assert_table_exists() {
     local db_name="$1"
     local table_name="$2"
 
-    local exists=$(psql -h localhost -U "$TEST_DB_USER" "$db_name" -t -c "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = '$table_name')")
+    local exists=$(psql -h localhost -U "$TEST_DB_USER" "$db_name" -t -c "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'anonymous' AND table_name = '$table_name')")
 
     if [[ "$exists" =~ "f" ]]; then
         echo -e "${RED}✗ ASSERTION FAILED: Table $table_name should exist${NC}"
@@ -309,7 +309,7 @@ assert_row_count() {
     local expected_count="$3"
     local where_clause="${4:-}"
 
-    local query="SELECT COUNT(*) FROM public.$table_name"
+    local query="SELECT COUNT(*) FROM anonymous.$table_name"
     if [ -n "$where_clause" ]; then
         query="$query WHERE $where_clause"
     fi

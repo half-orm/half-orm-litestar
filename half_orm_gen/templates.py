@@ -163,7 +163,7 @@ def _get_roles(request):
     if roles is not None:
         return roles
     token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
-    return [token] if token else ['public']
+    return [token] if token else ['anonymous']
 
 
 def _get_role_filter(crud_access, verb, authorized_roles):
@@ -321,7 +321,7 @@ CRUD_MODULE_IMPORT = "\nfrom {schema} import {module_name} as {module_alias}\n"
 HO_ACCESS_ROUTE = (
     '\n_STATIC_ACCESS_MAP = {json_str}\n'
     '\n_ACCESS_MAP = get_access_map()\n\n'
-    '@get("{version_prefix}/ho_access", guards=[guards.public])\n'
+    '@get("{version_prefix}/ho_access", guards=[guards.anonymous])\n'
     'async def _crud_access_map(request: Request) -> dict:\n'
     '    authorized_roles = _get_roles(request)\n'
     '    return _filter_access_for_roles(_ACCESS_MAP, authorized_roles)\n'
@@ -329,7 +329,7 @@ HO_ACCESS_ROUTE = (
 
 HO_ROLES_ROUTE = (
     '\n_ROLES = {roles_json}\n\n'
-    '@get("{version_prefix}/ho_roles", guards=[guards.public])\n'
+    '@get("{version_prefix}/ho_roles", guards=[guards.anonymous])\n'
     'async def _crud_roles_list(request: Request) -> list:\n'
     '    return _ROLES\n'
 )

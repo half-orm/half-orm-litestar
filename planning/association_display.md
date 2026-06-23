@@ -18,7 +18,7 @@ When viewing a record of `A`, the "Related" section shows raw rows of `AB`
 When viewing `A`, show the *associated entities* (`B`, or `(B, C)`) enriched
 with the non-FK columns of `AB` (the attributes of the association).
 
-Example — `public.project` → `public.projecthasuser` → `public.user`:
+Example — `anonymous.project` → `anonymous.projecthasuser` → `anonymous.user`:
 
 | name (user) | email (user) | role (AB) | joined_at (AB) |
 |---|---|---|---|

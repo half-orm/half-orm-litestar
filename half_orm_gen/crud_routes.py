@@ -507,7 +507,7 @@ def generate_crud_routes(
     if roles:
         blocks.append(
             templates.HO_ROLES_ROUTE.format(
-                roles_json=json.dumps(sorted(roles)),
+                roles_json=json.dumps(sorted(roles - {'ho_dev', 'anonymous'})),
                 version_prefix=version_prefix,
             )
         )

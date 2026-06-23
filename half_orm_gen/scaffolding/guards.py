@@ -23,7 +23,7 @@ from litestar.handlers.base import BaseRouteHandler
 from litestar.exceptions import NotAuthorizedException, HTTPException
 
 
-async def public(connection: ASGIConnection, handler: BaseRouteHandler = None) -> None:
+async def anonymous(connection: ASGIConnection, handler: BaseRouteHandler = None) -> None:
     """Allow all requests."""
     return
 

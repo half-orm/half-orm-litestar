@@ -164,7 +164,7 @@ app = build_crud_app(
 
 ```python
 def _ho_meta_handler(model):
-    @get('/ho_meta', guards=[guards.public])
+    @get('/ho_meta', guards=[guards.anonymous])
     async def ho_meta() -> dict:
         return model.ho_meta()
     return ho_meta
