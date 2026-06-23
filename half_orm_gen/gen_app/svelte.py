@@ -19,7 +19,6 @@ from half_orm_gen.crud_routes import (
     _instance,
     _py_type_str,
 )
-from half_orm_gen.gen_store.svelte import SvelteGenerator
 from half_orm_gen.gen_store.base import StoreGenerator
 
 
@@ -288,6 +287,11 @@ def _login_page(version_prefix: str) -> str:
           {{role}}
         </button>
       {{/each}}
+      <button onclick={{() => selectRole('ho_dev')}}
+              class="w-full text-left px-4 py-3 border border-dashed border-orange-300 rounded
+                     hover:bg-orange-50 transition-colors text-sm font-medium text-orange-600">
+        ho_dev <span class="text-xs font-normal text-orange-400">(dev super-role)</span>
+      </button>
     </div>
   {{/if}}
 </div>
@@ -412,7 +416,7 @@ def _title(schema_name: str, table_name: str) -> str:
     return f'{schema_name}.{table_name}'
 
 
-def _layout(resources: list) -> str:
+def _layout(resources: list, version_prefix: str = '') -> str:
     nav_items_js = ',\n    '.join(
         f'{{ href: "/ho_bo/{sn}/{tn}", label: "{_title(sn, tn)}" }}'
         for sn, tn, *_ in resources
@@ -421,9 +425,16 @@ def _layout(resources: list) -> str:
 <script lang="ts">
   import '../../app.css';
   import {{ auth }} from '$lib/auth.svelte.ts';
+  import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
 
   let {{ children }} = $props();
   let navFilter = $state('');
+
+  $effect(() => {{
+    void auth.token;
+    void registry.init('{version_prefix}');
+  }});
+
   const navItems = [
     {nav_items_js}
   ].sort((a, b) => a.label.localeCompare(b.label));
@@ -509,10 +520,10 @@ def _list_component(
 
     def _sort_th(f: str) -> str:
         toggle = (
-            f"() => {{ if ({rname}State.sortField === '{f}') {rname}State.sortAsc = !{rname}State.sortAsc;"
-            f" else {{ {rname}State.sortField = '{f}'; {rname}State.sortAsc = true; }} }}"
+            f"() => {{ if (silo.sortField === '{f}') silo.sortAsc = !silo.sortAsc;"
+            f" else {{ silo.sortField = '{f}'; silo.sortAsc = true; }} }}"
         )
-        indicator = f"{{#if {rname}State.sortField === '{f}'}}{{{rname}State.sortAsc ? '↑' : '↓'}}{{/if}}"
+        indicator = f"{{#if silo.sortField === '{f}'}}{{silo.sortAsc ? '↑' : '↓'}}{{/if}}"
         return (
             f'<th onclick={{{toggle}}}'
             f' class="px-4 py-2 text-left text-sm font-semibold text-gray-600'
@@ -575,9 +586,9 @@ def _list_component(
     if pk_field:
         tr_attrs = (
             f'class="border-t hover:bg-gray-50 cursor-pointer" '
-            f'class:bg-blue-50={{{rname}State.selectedId === String({pk_item_expr})}} '
-            f'class:border-l-4={{{rname}State.selectedId === String({pk_item_expr})}} '
-            f'class:border-l-blue-500={{{rname}State.selectedId === String({pk_item_expr})}} '
+            f'class:bg-blue-50={{silo.selectedId === String({pk_item_expr})}} '
+            f'class:border-l-4={{silo.selectedId === String({pk_item_expr})}} '
+            f'class:border-l-blue-500={{silo.selectedId === String({pk_item_expr})}} '
             f'data-item-id={{String({pk_item_expr})}} '
             f'onclick={{() => selectAndNavigate(String({pk_item_expr}))}}'
         )
@@ -609,8 +620,8 @@ def _list_component(
     delete_fn  = (
         f'\n  async function handleDelete(id: string) {{\n'
         f'    if (confirm(\'Delete this item?\')) {{\n'
-        f'      const res = await {rname}Api.remove(id);\n'
-        f'      if (res.ok) {rname}State.removeItem(String(id));\n'
+        f'      const res = await silo.remove(id);\n'
+        f'      if (res.ok) silo.removeItem(String(id));\n'
         f'    }}\n'
         f'  }}'
         if has_del and pk_field else ''
@@ -653,34 +664,34 @@ def _list_component(
 
     return f"""\
 <script lang="ts">
-  import {{ {rname}State, {rname}Api }} from '$lib/generated/stores/{stem}.svelte.ts';
-  import type {{ {iname}Out }} from '$lib/generated/stores/{stem}.svelte.ts';
+  import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
+  import type {{ Row }} from '$lib/generated/stores/resource.silo.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
-  import {{ untrack }} from 'svelte';
   import {{ goto }} from '$app/navigation';
 
   let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
 
+  const silo = registry.get('{map_key}');
   const hasFilters = $derived(Object.keys(filters).length > 0);
 {field_types_code}
 {"" if not pk_field else f"""
   let localFilters = $state<Record<string, string>>({{}});
 
-  // Initialize localFilters from URL or store on mount (using a closure to run once)
+  // Initialize localFilters from URL or silo on mount (using a closure to run once)
   (() => {{
     if (!embedded) {{
       const urlFilters = initFiltersFromUrl(new URLSearchParams(window.location.search));
       if (Object.keys(urlFilters).length > 0) {{
         // URL has priority
         localFilters = urlFilters;
-        {rname}State.filters = urlFilters;
+        silo.filters = urlFilters;
       }} else {{
-        // Try to restore from store
-        const storeFilters = {rname}State.filters;
-        if (Object.keys(storeFilters).length > 0) {{
-          localFilters = storeFilters;
-          // Update URL to reflect store filters
-          const newUrl = buildUrlWithFilters(window.location.pathname, storeFilters);
+        // Try to restore from silo
+        const siloFilters = silo.filters;
+        if (Object.keys(siloFilters).length > 0) {{
+          localFilters = siloFilters;
+          // Update URL to reflect silo filters
+          const newUrl = buildUrlWithFilters(window.location.pathname, siloFilters);
           if (newUrl !== window.location.pathname + window.location.search) {{
             goto(newUrl, {{ replaceState: true, keepFocus: true }});
           }}
@@ -694,22 +705,22 @@ def _list_component(
   }}
 
   function selectAndNavigate(id: string) {{
-    {rname}State.selectedId = id;
+    silo.selectedId = id;
     goto(`/ho_bo/{schema_name}/{table_name}/${{id}}`);
   }}
 
   const displayItems = $derived.by(() => {{
-    let items: {iname}Out[] = hasFilters
-      ? Array.from({rname}State.byId.values()).filter(item =>
+    let items: Row[] = hasFilters
+      ? Array.from(silo.byId.values()).filter(item =>
             Object.entries(filters).every(([k, v]) => String((item as any)[k]) === String(v)))
-      : {rname}State.items;
+      : silo.items;
     const lf = localFilters;
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
-    const sf = {rname}State.sortField;
+    const sf = silo.sortField;
     if (sf) {{
-      const asc = {rname}State.sortAsc;
+      const asc = silo.sortAsc;
       items = [...items].sort((a, b) => {{
         const av = String((a as any)[sf] ?? '');
         const bv = String((b as any)[sf] ?? '');
@@ -722,14 +733,14 @@ def _list_component(
   let localFilters = $state<Record<string, string>>({{}});
 
   const displayItems = $derived.by(() => {{
-    let items: {iname}Out[] = {rname}State.items;
+    let items: Row[] = silo.items;
     const lf = localFilters;
     if (Object.values(lf).some(v => v))
       items = items.filter(item =>
         Object.entries(lf).every(([k, v]) => matchFilter((item as any)[k], v)));
-    const sf = {rname}State.sortField;
+    const sf = silo.sortField;
     if (sf) {{
-      const asc = {rname}State.sortAsc;
+      const asc = silo.sortAsc;
       items = [...items].sort((a, b) => {{
         const av = String((a as any)[sf] ?? '');
         const bv = String((b as any)[sf] ?? '');
@@ -740,28 +751,12 @@ def _list_component(
   }});
 """.rstrip()}
 
-  let hasMore = $state(true);
-  let currentOffset = $state(0);
-  let isLoading = $state(false);
-
   $effect(() => {{
     void auth.token;
-    isLoading = true;
-    {rname}Api.list(filters).then(result => {{
-      hasMore = result.has_more;
-      currentOffset = result.offset;
-      isLoading = false;
-    }});
+    void silo.list(filters);
   }});
 
-  async function loadMore() {{
-    if (!hasMore || isLoading) return;
-    isLoading = true;
-    const result = await {rname}Api.list(filters, currentOffset);
-    hasMore = result.has_more;
-    currentOffset = result.offset;
-    isLoading = false;
-  }}
+  function loadMore() {{ silo.loadMore(filters); }}
 
   // Backend filtering with debounce
   let filterDebounceTimer: number | undefined;
@@ -785,21 +780,15 @@ def _list_component(
       // Only trigger if we have filters now, or we had filters before (to clear them)
       if (hasFiltersNow || hadFilters) {{
         hadFilters = hasFiltersNow;
-        // Reset state for new filter search
-        hasMore = true;
-        currentOffset = 0;
-        isLoading = true;
+        // Reset pagination state
+        silo.resetFilterState();
         const searchParams = hasFiltersNow ? {{ q: filterPairs.join(',') }} as any : {{}};
-        {rname}Api.list(searchParams, 0).then(result => {{
-          hasMore = result.has_more;
-          currentOffset = result.offset;
-          isLoading = false;
-        }});
+        void silo.list(searchParams, 0);
       }}
     }}, 600);
   }});
 
-  // Sync filters to URL and store (with debounce handling)
+  // Sync filters to URL and silo (with debounce handling)
   let urlSyncTimer: number | undefined;
   $effect(() => {{
     if (embedded) return; // Don't sync URL for embedded components
@@ -809,8 +798,8 @@ def _list_component(
 
     if (urlSyncTimer) clearTimeout(urlSyncTimer);
     urlSyncTimer = window.setTimeout(() => {{
-      // Update store with current filters
-      {rname}State.filters = lf;
+      // Update silo with current filters
+      silo.filters = lf;
 
       const newUrl = buildUrlWithFilters(window.location.pathname, lf);
 
@@ -837,11 +826,11 @@ def _list_component(
     }};
   }}
 {"" if not pk_field else f"""
-  // Store handles WS updates; list reacts via $state signals automatically
+  // Silo handles WS updates; list reacts via $state signals automatically
 
   // Scroll to selected item when component mounts or items change
   $effect(() => {{
-    const selectedId = {rname}State.selectedId;
+    const selectedId = silo.selectedId;
     const items = displayItems; // Track displayItems changes
 
     if (selectedId && items.length > 0) {{
@@ -881,7 +870,7 @@ def _list_component(
         {td_cols}
         </tr>
       {{/each}}
-      {{#if isLoading}}
+      {{#if silo.isLoading}}
         <tr><td colspan="100" class="text-center py-4 text-gray-500">Loading...</td></tr>
       {{/if}}
     </tbody>
@@ -1060,6 +1049,7 @@ def _new_page(
         f'{f}: false' if _is_bool_field(f, all_fields) else f'{f}: ""'
         for f in visible_post
     )
+    map_key         = f'{schema_name}/{table_name}'
     optional_set_js = ', '.join(f"'{f}'" for f in optional_post_fields)
     text_fields_js  = _text_fields_js(visible_post, all_fields)
     form_fields = '\n    '.join(
@@ -1068,11 +1058,11 @@ def _new_page(
     )
     return f"""\
 <script lang="ts">
-  import {{ {rname}Api, {rname}State }} from '$lib/generated/stores/{stem}.svelte.ts';
-  import type {{ {iname}PostIn }} from '$lib/generated/stores/{stem}.svelte.ts';
+  import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
   import {{ goto }} from '$app/navigation';
 
-  let form = $state<Partial<{iname}PostIn>>({{ {fields_init} }});
+  const silo = registry.get('{map_key}');
+  let form = $state<Record<string, unknown>>({{ {fields_init} }});
   let error = $state('');
 
   const optionalFields = new Set([{optional_set_js}]);
@@ -1082,14 +1072,14 @@ def _new_page(
     e.preventDefault();
     try {{
       const payload = Object.fromEntries(
-        Object.entries(form as unknown as Record<string, unknown>)
+        Object.entries(form)
           .filter(([k, v]) => !optionalFields.has(k) || v !== '')
           {_null_map_js()}
-      ) as unknown as {iname}PostIn;
-      const res = await {rname}Api.create(payload);
+      );
+      const res = await silo.create(payload);
       if (!res.ok) throw new Error(await res.text());
       const created = await res.json();
-      {rname}State.setItem(created);
+      silo.setItem(created);
       goto('/ho_bo/{schema_name}/{table_name}');
     }} catch (err: any) {{
       error = err.message;
@@ -1157,9 +1147,9 @@ def _fields_component_svelte(
 
     return f"""\
 <script lang="ts">{latex_import}
-  import type {{ {iname}Out }} from '$lib/generated/stores/{schema_name}_{table_name}.svelte.ts';
+  import type {{ Row }} from '$lib/generated/stores/resource.silo.svelte.ts';
 
-  let {{ item }}: {{ item: {iname}Out }} = $props();
+  let {{ item }}: {{ item: Row }} = $props();
 </script>
 
 <div class="space-y-2">
@@ -1208,7 +1198,7 @@ def _detail_page(
         put_text_fields_js = _text_fields_js(visible_put, all_fields)
         extra_script = (
             f'\n  let editing = $state(false);\n'
-            f'  let form = $state({{ {empty_init} }});\n'
+            f'  let form = $state<Record<string, unknown>>({{ {empty_init} }});\n'
             f'  let error = $state(\'\');\n'
             f'  const putTextFields = new Set([{put_text_fields_js}]);\n'
             f'  $effect(() => {{\n'
@@ -1220,13 +1210,13 @@ def _detail_page(
             f'    e.preventDefault();\n'
             f'    try {{\n'
             f'      const putPayload = Object.fromEntries(\n'
-            f'        Object.entries(form as unknown as Record<string, unknown>)\n'
+            f'        Object.entries(form)\n'
             f'          {_null_map_js("putTextFields")}\n'
-            f'      ) as unknown as {iname}PutIn;\n'
-            f'      const res = await {rname}Api.update(id, putPayload);\n'
+            f'      );\n'
+            f'      const res = await silo.update(id, putPayload);\n'
             f'      if (!res.ok) throw new Error(await res.text());\n'
             f'      const updated = await res.json();\n'
-            f'      {rname}State.setItem(updated);\n'
+            f'      silo.setItem(updated);\n'
             f'      editing = false;\n'
             f'      document.querySelector(\'main\')?.scrollTo({{ top: 0, behavior: \'smooth\' }});\n'
             f'    }} catch (err: any) {{\n'
@@ -1259,7 +1249,6 @@ def _detail_page(
   {{/if}}"""
 
     map_key       = f'{schema_name}/{table_name}'
-    put_in_import = f', {iname}PutIn' if has_put else ''
     can_edit      = f"\n  const canEdit = $derived(!!auth.access['{map_key}']?.PUT);" if has_put else ''
     edit_btn_wrap = (
         f'\n      {{#if canEdit}}{edit_btn}\n      {{/if}}'
@@ -1275,9 +1264,7 @@ def _detail_page(
             if s in seen:
                 continue
             seen.add(s)
-            rn = _rname(rs, rt)
             cn = _cname(rs, rt)
-            lines.append(f"  import {{ {rn}State, {rn}Api }} from '$lib/generated/stores/{s}.svelte.ts';")
             lines.append(f"  import {cn}Fields from '$lib/generated/components/{s}/Fields.svelte';")
         return ('\n' + '\n'.join(lines)) if lines else ''
 
@@ -1289,39 +1276,25 @@ def _detail_page(
     def _fk_ref_states(deps: list) -> str:
         lines = []
         for lf, rs, rt, _ in deps:
-            rn = _rname(rs, rt)
+            fk_key = f'{rs}/{rt}'
             lines.append(
-                f"  let {_lf_ref_name(lf)} = $derived(item?.{lf} ? {rn}State.byId.get(String(item.{lf})) ?? null : null);"
+                f"  let {_lf_ref_name(lf)} = $derived(item && item['{lf}'] ? "
+                f"registry.tryGet('{fk_key}')?.byId.get(String(item['{lf}'])) ?? null : null);"
             )
         return ('\n' + '\n'.join(lines)) if lines else ''
 
     def _fk_ref_effects(deps: list) -> str:
         blocks = []
         for lf, rs, rt, _ in deps:
-            rn = _rname(rs, rt)
+            fk_key = f'{rs}/{rt}'
             blocks.append(
                 f'  $effect(() => {{\n'
-                f'    if (!item?.{lf}) return;\n'
-                f'    const _url = {rn}Api.getUrl(item.{lf});\n'
-                f'    if (!auth.fetchedRoutes.has(_url))\n'
-                f'      {rn}Api.get(item.{lf}).then(r => r.ok ? r.json() : null)\n'
-                f'               .then(d => {{ if (d) {rn}State.setItem(d); }});\n'
-                f'  }});'
-            )
-        return ('\n' + '\n'.join(blocks)) if blocks else ''
-
-    def _fk_ws_effects(deps: list) -> str:
-        blocks = []
-        for lf, rs, rt, _ in deps:
-            rn = _rname(rs, rt)
-            fk_map_key = f'{rs}/{rt}'
-            blocks.append(
-                f'  $effect(() => {{\n'
-                f'    const ev = auth.lastEvent;\n'
-                f'    const v = item?.{lf};\n'
-                f"    if (ev?.resource === '{fk_map_key}' && v && String(ev.id) === String(v) && ev.event !== 'delete')\n"
-                f'      untrack(() => {rn}Api.refresh(v).then(r => r.ok ? r.json() : null)\n'
-                f'               .then(d => {{ if (d) {rn}State.setItem(d); }}));\n'
+                f"    const _lf = item && item['{lf}'];\n"
+                f'    if (!_lf) return;\n'
+                f"    const _fk = registry.tryGet('{fk_key}');\n"
+                f'    if (!_fk) return;\n'
+                f'    const _url = _fk.getUrl(String(_lf));\n'
+                f'    if (!auth.fetchedRoutes.has(_url)) void _fk.get(String(_lf));\n'
                 f'  }});'
             )
         return ('\n' + '\n'.join(blocks)) if blocks else ''
@@ -1389,20 +1362,19 @@ def _detail_page(
 
     return f"""\
 <script lang="ts">
-  import {{ {rname}State, {rname}Api }} from '$lib/generated/stores/{stem}.svelte.ts';
-  import type {{ {iname}Out{put_in_import} }} from '$lib/generated/stores/{stem}.svelte.ts';
+  import {{ registry }} from '$lib/generated/stores/silo-registry.svelte.ts';
   import {{ goto }} from '$app/navigation';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ untrack }} from 'svelte';
   import Fields from '$lib/generated/components/{stem}/Fields.svelte';{fk_imports}{rev_imports}
 
+  const silo = registry.get('{map_key}');
   let {{ id }}: {{ id: string }} = $props();
-  let item = $derived({rname}State.byId.get(id) ?? null);
+  let item = $derived(silo.byId.get(id) ?? null);
 {fk_states}
   $effect(() => {{
     void auth.token;
-    if (!item) untrack(() => {rname}Api.get(id).then(r => r.ok ? r.json() : null)
-                .then(d => {{ if (d) {rname}State.setItem(d); }}));
+    if (!item) untrack(() => void silo.get(id));
   }});
 
   $effect(() => {{
@@ -1466,9 +1438,18 @@ class SvelteAppGenerator(StoreGenerator):
         self._write(output_dir / 'src' / 'app.html',    _APP_HTML)
         self._write(output_dir / 'src' / 'app.css',     _APP_CSS)
 
-        # --- stores (reuse SvelteGenerator) ---
+        # --- shared stores (schema types + resource silo + registry) ---
         stores_dir = output_dir / 'src' / 'lib' / 'generated' / 'stores'
-        SvelteGenerator().generate(classes, api_version, stores_dir)
+        stores_dir.mkdir(parents=True, exist_ok=True)
+        svelte_assets = Path(__file__).parent / 'assets' / 'svelte'
+        for fname in ('schema.types.ts', 'resource.silo.svelte.ts', 'silo-registry.svelte.ts'):
+            shutil.copy2(svelte_assets / fname, stores_dir / fname)
+            print(f'  {stores_dir / fname}')
+        # Copy shared filters module
+        filters_src = Path(__file__).parent.parent / 'templates_filters.ts'
+        if filters_src.exists():
+            shutil.copy2(filters_src, stores_dir / 'filters.ts')
+            print(f'  {stores_dir / "filters.ts"}')
 
         # --- stateRegistry + auth store + WS env var ---
         self._write(output_dir / 'src' / 'lib' / 'latex.ts', _LATEX_TS)
@@ -1568,7 +1549,7 @@ class SvelteAppGenerator(StoreGenerator):
         self._write(routes_dir / '+layout.svelte',
                     '<script>\n  import \'../app.css\';\n  let { children } = $props();\n</script>\n{@render children()}\n')
         # (nav) group provides the sidebar layout for all other pages
-        self._write(routes_dir / '(nav)' / '+layout.svelte', _layout(resources))
+        self._write(routes_dir / '(nav)' / '+layout.svelte', _layout(resources, version_prefix))
         self._write(routes_dir / '(nav)' / 'ho_bo' / '+layout.svelte', _admin_layout())
         first_route = (
             f'/ho_bo/{resources[0][0]}/{resources[0][1]}' if resources else '/ho_bo'

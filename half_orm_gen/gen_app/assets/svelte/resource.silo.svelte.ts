@@ -1,0 +1,190 @@
+import { auth } from '$lib/auth.svelte.ts';
+import { registerClear } from '$lib/stateRegistry';
+import type { ResourceSchema } from './schema.types';
+
+export type Row = Record<string, unknown>;
+
+export class ResourceSilo {
+  items         = $state<Row[]>([]);
+  byId          = $state(new Map<string, Row>());
+  isLoading     = $state(false);
+  hasMore       = $state(true);
+  currentOffset = $state(0);
+
+  filters    = $state<Record<string, string>>({});
+  selectedId = $state<string | null>(null);
+  sortField  = $state<string | null>(null);
+  sortAsc    = $state(true);
+
+  private loadedFilters = new Map<string, boolean>();
+  private pk: string | null;
+
+  constructor(
+    readonly key: string,
+    readonly schema: ResourceSchema,
+    private baseUrl: string,
+  ) {
+    this.pk = schema.pk_fields.length === 1 ? schema.pk_fields[0] : null;
+    registerClear(() => this.clear());
+    $effect.root(() => {
+      $effect(() => {
+        const ev = auth.lastEvent;
+        if (!ev || ev.resource !== key) return;
+        if (ev.event === 'delete') this.removeItem(String(ev.id));
+        else void this.refresh(String(ev.id as string));
+      });
+    });
+  }
+
+  private get hdrs(): Record<string, string> {
+    return auth.token ? { Authorization: `Bearer ${auth.token}` } : {};
+  }
+
+  pkValue(item: Row): string | null {
+    return this.pk ? String(item[this.pk]) : null;
+  }
+
+  listUrl(params: Row = {}): string {
+    const filtered = Object.fromEntries(
+      Object.entries(params)
+        .filter(([, v]) => v != null && (typeof v !== 'string' || v !== ''))
+        .map(([k, v]) => [`ho_col_${k}`, String(v)])
+    );
+    const qs = new URLSearchParams(filtered).toString();
+    return qs ? `${this.baseUrl}?${qs}` : this.baseUrl;
+  }
+
+  getUrl(id: string): string { return `${this.baseUrl}/${id}`; }
+
+  async list(params: Row = {}, offset = 0): Promise<void> {
+    const filterKey = JSON.stringify(params);
+    if (offset === 0 && this.loadedFilters.get(filterKey)) return;
+    if (this.isLoading) return;
+
+    const searchQ = params['q'];
+    const otherParams = searchQ ? {} : params;
+    const baseUrl = this.listUrl(otherParams);
+    const sep = baseUrl.includes('?') ? '&' : '?';
+    const urlParams = new URLSearchParams();
+    if (searchQ) urlParams.set('q', String(searchQ));
+    if (offset > 0) urlParams.set('offset', String(offset));
+    urlParams.set('limit', '100');
+    const qs = urlParams.toString();
+    const url = qs ? `${baseUrl}${sep}${qs}` : baseUrl;
+    if (auth.fetchedRoutes.has(url)) return;
+    auth.fetchedRoutes.add(url);
+
+    this.isLoading = true;
+    try {
+      const res = await fetch(url, { headers: this.hdrs });
+      if (!res.ok) return;
+      const { data, meta } = await res.json() as { data: Row[]; meta: { offset: number; limit: number; has_more: boolean } };
+      if (offset === 0 && !searchQ && Object.keys(params).length === 0) this._setItems(data);
+      else this._mergeItems(data);
+      this.hasMore = meta.has_more;
+      this.currentOffset = offset + data.length;
+      if (!meta.has_more) this.loadedFilters.set(filterKey, true);
+    } finally {
+      this.isLoading = false;
+    }
+  }
+
+  loadMore(params: Row = {}): void {
+    if (!this.hasMore || this.isLoading) return;
+    void this.list(params, this.currentOffset);
+  }
+
+  resetFilterState(): void {
+    this.loadedFilters.clear();
+    this.hasMore = true;
+    this.currentOffset = 0;
+  }
+
+  async get(id: string): Promise<Row | null> {
+    const cached = this.byId.get(id);
+    if (cached) return cached;
+    return this.refresh(id);
+  }
+
+  async refresh(id: string): Promise<Row | null> {
+    const url = this.getUrl(id);
+    auth.fetchedRoutes.add(url);
+    const res = await fetch(url, { headers: this.hdrs });
+    if (!res.ok) return null;
+    const item = await res.json() as Row;
+    this.setItem(item);
+    return item;
+  }
+
+  create(data: Row): Promise<Response> {
+    return fetch(this.baseUrl, {
+      method: 'POST',
+      headers: { ...this.hdrs, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  }
+
+  update(id: string, data: Row): Promise<Response> {
+    return fetch(`${this.baseUrl}/${id}`, {
+      method: 'PUT',
+      headers: { ...this.hdrs, 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+  }
+
+  remove(id: string): Promise<Response> {
+    return fetch(`${this.baseUrl}/${id}`, {
+      method: 'DELETE',
+      headers: this.hdrs,
+    });
+  }
+
+  private _setItems(items: Row[]): void {
+    this.items = items;
+    if (this.pk) {
+      const pk = this.pk;
+      this.byId = new Map(items.map(i => [String(i[pk]), i]));
+    }
+  }
+
+  private _mergeItems(newItems: Row[]): void {
+    if (!this.pk) {
+      this.items = [...this.items, ...newItems];
+      return;
+    }
+    const pk = this.pk;
+    const map = new Map(this.byId);
+    for (const item of newItems) map.set(String(item[pk]), item);
+    this.byId = map;
+    this.items = [...map.values()];
+  }
+
+  setItem(item: Row): void {
+    if (!this.pk) return;
+    const pk = this.pk;
+    const id = String(item[pk]);
+    const map = new Map(this.byId);
+    map.set(id, item);
+    this.byId = map;
+    const idx = this.items.findIndex(i => String(i[pk]) === id);
+    if (idx >= 0) { const next = [...this.items]; next[idx] = item; this.items = next; }
+    else this.items = [...this.items, item];
+  }
+
+  removeItem(id: string): void {
+    if (!this.pk) return;
+    const pk = this.pk;
+    const map = new Map(this.byId);
+    map.delete(id);
+    this.byId = map;
+    this.items = this.items.filter(i => String(i[pk]) !== id);
+  }
+
+  clear(): void {
+    this.items = [];
+    this.byId = new Map();
+    this.loadedFilters.clear();
+    this.hasMore = true;
+    this.currentOffset = 0;
+  }
+}
