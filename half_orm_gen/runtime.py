@@ -275,12 +275,17 @@ def _make_list_handler(path: str, cls, crud_access: dict, api_excluded: list, re
         range_filters: list = []
         if q:
             filter_kwargs, search_cols, range_filters = _parse_q(q, api_excluded)
+        col_filters: dict = {
+            k[7:]: v
+            for k, v in request.query_params.items()
+            if k.startswith('ho_col_') and k[7:] not in api_excluded
+        }
         role_filter = _get_role_filter(crud_access, 'GET', roles)
         authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded)
         if authorized is None:
             return {'data': [], 'meta': {'offset': offset, 'limit': limit, 'has_more': False}}
         projection = [f for f in fields if not authorized or f in authorized] if fields else authorized
-        inst = cls(**{**filter_kwargs, **role_filter})
+        inst = cls(**{**filter_kwargs, **col_filters, **role_filter})
         for col, op1, op1val, op2, op2val in range_filters:
             field = getattr(inst, col)
             if op1 == '>=':
