@@ -1107,10 +1107,15 @@ def _new_page(
 
 def _fields_component_svelte(
     schema_name: str, table_name: str,
-    iname: str, pk_field: str,
+    iname: str, pk_field: str, pk_info: list,
     out_names: list, fk_deps: list, all_fields: dict,
 ) -> str:
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
+
+    if len(pk_info) == 1:
+        _pk_url = f'{{item.{pk_field}}}'
+    else:
+        _pk_url = '::'.join(f'{c}:${{item.{c}}}' for c, _, _ in pk_info)
 
     has_latex = any(
         f not in fk_map and f != pk_field and f in all_fields
@@ -1123,8 +1128,11 @@ def _fields_component_svelte(
         label = f'<span class="font-medium text-gray-600 w-36 shrink-0">{f}</span>'
         if f == pk_field:
             return (
-                f'<div class="flex gap-2 items-baseline">{label}'
-                f'<span class="font-mono text-xs text-gray-500 break-all">{{item.{f}}}</span></div>'
+                f'{{#if !hidePk}}\n'
+                f'  <div class="flex gap-2 items-baseline">{label}'
+                f'<a href="/ho_bo/{schema_name}/{table_name}/{_pk_url}"'
+                f' class="font-mono text-xs text-blue-500 hover:underline break-all">{{item.{f}}}</a></div>\n'
+                f'{{/if}}'
             )
         if f in fk_map:
             rs, rt = fk_map[f]
@@ -1149,7 +1157,7 @@ def _fields_component_svelte(
 <script lang="ts">{latex_import}
   import type {{ Row }} from '$lib/generated/stores/resource.silo.svelte.ts';
 
-  let {{ item }}: {{ item: Row }} = $props();
+  let {{ item, hidePk = false }}: {{ item: Row; hidePk?: boolean }} = $props();
 </script>
 
 <div class="space-y-2">
@@ -1181,7 +1189,7 @@ def _detail_page(
     # Form state + edit toggle — populated reactively from item once loaded
     extra_script = ''
     edit_btn     = ''
-    edit_section = '\n  <Fields {item} />'
+    edit_section = '\n  <Fields {item} hidePk />'
 
     if has_put and visible_put:
         empty_init  = ', '.join(
@@ -1232,7 +1240,7 @@ def _detail_page(
         edit_section = f"""
 
   {{#if !editing}}
-  <Fields {{item}} />
+  <Fields {{item}} hidePk />
   {{:else}}
   {{#if error}}<p class="text-red-600 mb-4">{{error}}</p>{{/if}}
   <form onsubmit={{handleUpdate}} class="space-y-4">
@@ -1307,11 +1315,10 @@ def _detail_page(
             f'\n{{#if {lf_ref}}}\n'
             f'<div class="mt-4 p-6 bg-white rounded-lg shadow">\n'
             f'  <div class="flex justify-between items-center mb-3">\n'
-            f'    <h2 class="text-lg font-semibold">{_title(rs, rt)}</h2>\n'
             f'    <a href="/ho_bo/{rs}/{rt}/{{{lf_ref}.{remote_pk}}}"'
-            f' class="text-sm text-blue-600 hover:underline">→</a>\n'
+            f' class="text-lg font-semibold hover:underline hover:text-blue-700">{_title(rs, rt)}</a>\n'
             f'  </div>\n'
-            f'  <{fk_fields} item={{{lf_ref}}} />\n'
+            f'  <{fk_fields} item={{{lf_ref}}} hidePk />\n'
             f'</div>\n'
             f'{{/if}}'
         )
@@ -1334,7 +1341,7 @@ def _detail_page(
         return (
             f'\n<div class="mt-4 bg-white rounded-lg shadow overflow-hidden">\n'
             f'  <div class="px-6 pt-5 pb-3 flex items-center justify-between">\n'
-            f'    <h2 class="text-lg font-semibold">{_title(rs, rt)}</h2>\n'
+            f'    <a href="/ho_bo/{rs}/{rt}" class="text-lg font-semibold hover:underline hover:text-blue-700">{_title(rs, rt)}</a>\n'
             f'    <span class="flex items-center gap-1 text-xs text-gray-400">\n'
             f'      <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">\n'
             f'        <path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clip-rule="evenodd"/>\n'
@@ -1393,7 +1400,7 @@ def _detail_page(
         <h1 class="text-2xl font-bold">{title}</h1>
         <div class="flex gap-3 items-center">
 {edit_btn_wrap}
-          <a href="/ho_bo/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
+          <button onclick={{() => history.back()}} class="text-sm text-gray-500 hover:underline">← Back</button>
         </div>
       </div>
 
@@ -1600,7 +1607,7 @@ class SvelteAppGenerator(StoreGenerator):
                 self._write(
                     comp_dir / 'Fields.svelte',
                     _fields_component_svelte(schema_name, table_name, iname,
-                                             pk_field, out_names, fk_deps, all_fields),
+                                             pk_field, pk_info, out_names, fk_deps, all_fields),
                 )
                 self._write(
                     comp_dir / 'DetailView.svelte',

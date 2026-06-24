@@ -1742,8 +1742,7 @@ def _detail_component(
     @if (item() && item()!['{lf}']) {{
       <div class="mt-4 p-6 bg-white rounded-lg shadow">
         <div class="flex justify-between items-center mb-3">
-          <h2 class="text-lg font-semibold">{rt_title}</h2>
-          <a [routerLink]="['/ho_bo/{rs}/{rt}', String(item()!['{lf}'])]" class="text-sm text-blue-600 hover:underline">→</a>
+          <a [routerLink]="['/ho_bo/{rs}/{rt}', String(item()!['{lf}'])]" class="text-lg font-semibold hover:underline hover:text-blue-700">{rt_title}</a>
         </div>
         @if (registry.tryGet('{fk_key}')?.byId()?.get(String(item()!['{lf}'])); as ref) {{
           <{fk_fields_sel} [item]="ref!" />
@@ -1759,7 +1758,7 @@ def _detail_component(
         rev_sections += f"""
     <div class="mt-4 bg-white rounded-lg shadow overflow-hidden">
       <div class="px-6 pt-5 pb-3 flex items-center justify-between">
-        <h2 class="text-lg font-semibold">{rt_title}</h2>
+        <a routerLink="/ho_bo/{rs}/{rt}" class="text-lg font-semibold hover:underline hover:text-blue-700">{rt_title}</a>
         <span class="flex items-center gap-1 text-xs text-gray-400">
           <svg class="w-3.5 h-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
             <path fill-rule="evenodd" d="M3 3a1 1 0 011-1h12a1 1 0 011 1v3a1 1 0 01-.293.707L13 10.414V15a1 1 0 01-.553.894l-4 2A1 1 0 017 17v-6.586L3.293 6.707A1 1 0 013 6V3z" clip-rule="evenodd"/>
@@ -1832,6 +1831,7 @@ def _detail_component(
     return f"""\
 import {{ Component, computed, effect, inject, signal, untracked }} from '@angular/core';
 import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
+import {{ Location }} from '@angular/common';
 import {{ filter }} from 'rxjs';
 import {{ FormsModule }} from '@angular/forms';
 import {{ RouterLink, Router, ActivatedRoute }} from '@angular/router';
@@ -1851,7 +1851,7 @@ import {{ AuthService }} from '../../../core/auth.service';{own_fields_import}{f
             <div class="flex justify-between items-start mb-6">
               <h1 class="text-2xl font-bold">{title}</h1>
               <div class="flex gap-3 items-center">{edit_btn_tmpl}
-                <a routerLink="/ho_bo/{schema_name}/{table_name}" class="text-sm text-gray-500 hover:underline">← Back</a>
+                <button (click)="location.back()" class="text-sm text-gray-500 hover:underline">← Back</button>
               </div>
             </div>
             {edit_section_tmpl}
@@ -1868,6 +1868,7 @@ export class {iname}DetailComponent {{
   protected silo     = this.registry.get('{map_key}');
   protected auth     = inject(AuthService);
   protected router   = inject(Router);
+  protected location = inject(Location);
   private route      = inject(ActivatedRoute);
   protected String = String;  // For template use{pk_id_line}
 
