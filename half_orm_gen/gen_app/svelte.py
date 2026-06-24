@@ -719,7 +719,7 @@ def _list_component(
 
   const displayItems = $derived.by(() => {{
     let items: Row[] = hasFilters
-      ? Array.from(silo.byId.values()).filter(item =>
+      ? silo.items.filter(item =>
             Object.entries(filters).every(([k, v]) => String((item as any)[k]) === String(v)))
       : silo.items;
     const lf = localFilters;
