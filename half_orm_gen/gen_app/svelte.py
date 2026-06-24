@@ -573,7 +573,7 @@ def _list_component(
                 f'<td class="px-4 py-2 text-sm">'
                 f'<a href="/ho_bo/{rs}/{rt}/{{item.{f}}}"'
                 f' onclick={{(e) => {{ e.preventDefault(); e.stopPropagation(); goto(`/ho_bo/{rs}/{rt}/${{item.{f}}}`); }}}}'
-                f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
+                f' class="text-blue-500 hover:underline font-mono text-xs truncate block" class:max-w-xs={{!embedded}}'
                 f' title="{{cellTitle(item.{f})}}">{{fmtCell(item.{f})}}</a>'
                 f'</td>'
             )
@@ -583,7 +583,7 @@ def _list_component(
         )
         return (
             f'<td class="px-4 py-2 text-sm" onclick={{{cell_click}}}>'
-            f'<div class="truncate max-w-xs" title="{{cellTitle(item.{f})}}"'
+            f'<div class="truncate" class:max-w-xs={{!embedded}} title="{{cellTitle(item.{f})}}"'
             f' class:text-blue-600={{typeof (item as any).{f} === \'object\' && (item as any).{f} != null}}'
             f' class:cursor-pointer={{typeof (item as any).{f} === \'object\' && (item as any).{f} != null}}>'
             f'{{fmtCell(item.{f})}}</div></td>'
@@ -863,7 +863,7 @@ def _list_component(
 </div>
 {{/if}}
 
-<div class="{{embedded ? '' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'}}">
+<div class="{{embedded ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'}}">
   <table class="w-full border-collapse">
     <thead class="{{embedded ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'}}">
       <tr>

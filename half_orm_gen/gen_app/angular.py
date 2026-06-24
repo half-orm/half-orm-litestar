@@ -1194,13 +1194,13 @@ def _list_component(
             return (
                 f'<td class="px-4 py-2 text-sm">'
                 f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item[\'{f}\'])]" (click)="$event.stopPropagation()"'
-                f' class="text-blue-500 hover:underline font-mono text-xs truncate block max-w-xs"'
+                f' class="text-blue-500 hover:underline font-mono text-xs truncate block" [class.max-w-xs]="!embedded"'
                 f' [title]="cellTitle(item[\'{f}\'])">{{{{ fmtCell(item[\'{f}\']) }}}}</a>'
                 f'</td>'
             )
         return (
             f'<td class="px-4 py-2 text-sm" (click)="cellClick($event, $any(item)[\'{f}\'])">'
-            f'<div class="truncate max-w-xs" [title]="cellTitle(item[\'{f}\'])"'
+            f'<div class="truncate" [class.max-w-xs]="!embedded" [title]="cellTitle(item[\'{f}\'])"'
             f' [class.text-blue-600]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'"'
             f' [class.cursor-pointer]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'">'
             f'{{{{ fmtCell(item[\'{f}\']) }}}}</div>'
@@ -1345,7 +1345,7 @@ import type {{ FieldType }} from '../../../generated/stores/filters';
         <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
       </div>
     }}
-    <div [class]="embedded ? '' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
+    <div [class]="embedded ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
       <table class="w-full border-collapse">
         <thead [class]="embedded ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'">
           <tr>
