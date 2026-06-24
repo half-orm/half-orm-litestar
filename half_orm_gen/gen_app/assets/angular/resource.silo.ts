@@ -1,6 +1,6 @@
 import { signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { catchError, filter, of, tap } from 'rxjs';
+import { catchError, filter, map, of, tap } from 'rxjs';
 import { AuthService } from '../core/auth.service';
 import { registerClear } from '../core/state-registry';
 import { ResourceSchema } from './schema.types';
@@ -20,7 +20,8 @@ export class ResourceSilo {
   readonly sortAsc    = signal(true);
 
   private loadedFilters = new Map<string, boolean>();
-  private pk: string | null;
+  private pkExtractor: ((item: Row) => string) | null;
+  private pkFields: string[];
 
   constructor(
     readonly key: string,
@@ -29,7 +30,16 @@ export class ResourceSilo {
     private http: HttpClient,
     private auth: AuthService,
   ) {
-    this.pk = schema.pk_fields.length === 1 ? schema.pk_fields[0] : null;
+    this.pkFields = schema.pk_fields;
+    if (schema.pk_fields.length === 1) {
+      const pk = schema.pk_fields[0];
+      this.pkExtractor = (item) => String(item[pk]);
+    } else if (schema.pk_fields.length > 1) {
+      const fields = schema.pk_fields;
+      this.pkExtractor = (item) => fields.map(f => `${f}:${item[f]}`).join('::');
+    } else {
+      this.pkExtractor = null;
+    }
     registerClear(() => this.clear());
     this.auth.wsEvent$
       .pipe(filter(ev => ev.resource === key))
@@ -45,7 +55,7 @@ export class ResourceSilo {
   }
 
   pkValue(item: Row): string | null {
-    return this.pk ? String(item[this.pk]) : null;
+    return this.pkExtractor ? this.pkExtractor(item) : null;
   }
 
   listUrl(params: Row = {}): string {
@@ -107,6 +117,17 @@ export class ResourceSilo {
   get(id: string) {
     const cached = this.byId().get(id);
     if (cached) return of(cached);
+    // Composite PK: decode id back to field→value pairs and fetch via list
+    if (this.pkFields.length > 1) {
+      const params = this.parseCompositeId(id);
+      return this.http.get<{ data: Row[] }>(
+        this.listUrl(params), { headers: this.headers }
+      ).pipe(
+        tap(resp => { if (resp.data[0]) this.setItem(resp.data[0]); }),
+        map(resp => resp.data[0] ?? null),
+        catchError(() => of(null as Row | null))
+      );
+    }
     return this.refresh(id);
   }
 
@@ -137,45 +158,54 @@ export class ResourceSilo {
 
   private setItems(items: Row[]): void {
     this.items.set(items);
-    if (this.pk) {
-      const pk = this.pk;
-      this.byId.set(new Map(items.map(i => [String(i[pk]), i])));
+    if (this.pkExtractor) {
+      const ex = this.pkExtractor;
+      this.byId.set(new Map(items.map(i => [ex(i), i])));
     }
   }
 
   private mergeItems(newItems: Row[]): void {
-    if (!this.pk) {
+    if (!this.pkExtractor) {
       this.items.set([...this.items(), ...newItems]);
       return;
     }
-    const pk = this.pk;
+    const ex = this.pkExtractor;
     const map = new Map(this.byId());
-    for (const item of newItems) map.set(String(item[pk]), item);
+    for (const item of newItems) map.set(ex(item), item);
     this.byId.set(map);
     this.items.set([...map.values()]);
   }
 
   setItem(item: Row): void {
-    if (!this.pk) return;
-    const pk = this.pk;
-    const id = String(item[pk]);
+    if (!this.pkExtractor) return;
+    const ex = this.pkExtractor;
+    const id = ex(item);
     const map = new Map(this.byId());
     map.set(id, item);
     this.byId.set(map);
-    this.items.update(items => {
-      const idx = items.findIndex(i => String(i[pk]) === id);
+    this.items.update((items: Row[]) => {
+      const idx = items.findIndex((i: Row) => ex(i) === id);
       if (idx >= 0) { const next = [...items]; next[idx] = item; return next; }
       return [...items, item];
     });
   }
 
   removeItem(id: string): void {
-    if (!this.pk) return;
-    const pk = this.pk;
+    if (!this.pkExtractor) return;
+    const ex = this.pkExtractor;
     const map = new Map(this.byId());
     map.delete(id);
     this.byId.set(map);
-    this.items.update(items => items.filter(i => String(i[pk]) !== id));
+    this.items.update((items: Row[]) => items.filter((i: Row) => ex(i) !== id));
+  }
+
+  private parseCompositeId(id: string): Row {
+    const params: Row = {};
+    for (const part of id.split('::')) {
+      const colon = part.indexOf(':');
+      if (colon > 0) params[part.slice(0, colon)] = part.slice(colon + 1);
+    }
+    return params;
   }
 
   clear(): void {

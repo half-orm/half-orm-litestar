@@ -17,14 +17,24 @@ export class ResourceSilo {
   sortAsc    = $state(true);
 
   private loadedFilters = new Map<string, boolean>();
-  private pk: string | null;
+  private pkExtractor: ((item: Row) => string) | null;
+  private pkFields: string[];
 
   constructor(
     readonly key: string,
     readonly schema: ResourceSchema,
     private baseUrl: string,
   ) {
-    this.pk = schema.pk_fields.length === 1 ? schema.pk_fields[0] : null;
+    this.pkFields = schema.pk_fields;
+    if (schema.pk_fields.length === 1) {
+      const pk = schema.pk_fields[0];
+      this.pkExtractor = (item) => String(item[pk]);
+    } else if (schema.pk_fields.length > 1) {
+      const fields = schema.pk_fields;
+      this.pkExtractor = (item) => fields.map(f => `${f}:${item[f]}`).join('::');
+    } else {
+      this.pkExtractor = null;
+    }
     registerClear(() => this.clear());
     $effect.root(() => {
       $effect(() => {
@@ -41,7 +51,7 @@ export class ResourceSilo {
   }
 
   pkValue(item: Row): string | null {
-    return this.pk ? String(item[this.pk]) : null;
+    return this.pkExtractor ? this.pkExtractor(item) : null;
   }
 
   listUrl(params: Row = {}): string {
@@ -103,6 +113,15 @@ export class ResourceSilo {
   async get(id: string): Promise<Row | null> {
     const cached = this.byId.get(id);
     if (cached) return cached;
+    // Composite PK: decode id back to field→value pairs and fetch via list
+    if (this.pkFields.length > 1) {
+      const params = this.parseCompositeId(id);
+      const res = await fetch(this.listUrl(params), { headers: this.hdrs });
+      if (!res.ok) return null;
+      const { data } = await res.json() as { data: Row[] };
+      if (data[0]) this.setItem(data[0]);
+      return data[0] ?? null;
+    }
     return this.refresh(id);
   }
 
@@ -141,43 +160,52 @@ export class ResourceSilo {
 
   private _setItems(items: Row[]): void {
     this.items = items;
-    if (this.pk) {
-      const pk = this.pk;
-      this.byId = new Map(items.map(i => [String(i[pk]), i]));
+    if (this.pkExtractor) {
+      const ex = this.pkExtractor;
+      this.byId = new Map(items.map(i => [ex(i), i]));
     }
   }
 
   private _mergeItems(newItems: Row[]): void {
-    if (!this.pk) {
+    if (!this.pkExtractor) {
       this.items = [...this.items, ...newItems];
       return;
     }
-    const pk = this.pk;
+    const ex = this.pkExtractor;
     const map = new Map(this.byId);
-    for (const item of newItems) map.set(String(item[pk]), item);
+    for (const item of newItems) map.set(ex(item), item);
     this.byId = map;
     this.items = [...map.values()];
   }
 
   setItem(item: Row): void {
-    if (!this.pk) return;
-    const pk = this.pk;
-    const id = String(item[pk]);
+    if (!this.pkExtractor) return;
+    const ex = this.pkExtractor;
+    const id = ex(item);
     const map = new Map(this.byId);
     map.set(id, item);
     this.byId = map;
-    const idx = this.items.findIndex(i => String(i[pk]) === id);
+    const idx = this.items.findIndex((i: Row) => ex(i) === id);
     if (idx >= 0) { const next = [...this.items]; next[idx] = item; this.items = next; }
     else this.items = [...this.items, item];
   }
 
   removeItem(id: string): void {
-    if (!this.pk) return;
-    const pk = this.pk;
+    if (!this.pkExtractor) return;
+    const ex = this.pkExtractor;
     const map = new Map(this.byId);
     map.delete(id);
     this.byId = map;
-    this.items = this.items.filter(i => String(i[pk]) !== id);
+    this.items = this.items.filter((i: Row) => ex(i) !== id);
+  }
+
+  private parseCompositeId(id: string): Row {
+    const params: Row = {};
+    for (const part of id.split('::')) {
+      const colon = part.indexOf(':');
+      if (colon > 0) params[part.slice(0, colon)] = part.slice(colon + 1);
+    }
+    return params;
   }
 
   clear(): void {
