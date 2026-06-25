@@ -11,7 +11,7 @@ import importlib
 import shutil
 from pathlib import Path
 
-from half_orm_gen.crud_routes import (
+from half_orm_gen.backend.crud_routes import (
     _gen_out_fields,
     _gen_in_fields,
     _pk_info,
@@ -19,7 +19,7 @@ from half_orm_gen.crud_routes import (
     _instance,
     _py_type_str,
 )
-from half_orm_gen.gen_store.base import StoreGenerator
+from half_orm_gen.frontend.base import StoreGenerator
 
 
 # ---------------------------------------------------------------------------
@@ -1607,7 +1607,7 @@ class SvelteAppGenerator(StoreGenerator):
             shutil.copy2(svelte_assets / fname, stores_dir / fname)
             print(f'  {stores_dir / fname}')
         # Copy shared filters module
-        filters_src = Path(__file__).parents[4] / 'templates_filters.ts'
+        filters_src = Path(__file__).parents[2] / 'templates_filters.ts'
         if filters_src.exists():
             shutil.copy2(filters_src, stores_dir / 'filters.ts')
             print(f'  {stores_dir / "filters.ts"}')
@@ -1698,7 +1698,7 @@ class SvelteAppGenerator(StoreGenerator):
             ))
 
         # --- static assets ---
-        assets_src = Path(__file__).parents[4] / 'assets'
+        assets_src = Path(__file__).parents[3] / 'assets'
         static_dir = output_dir / 'static'
         static_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(assets_src / 'logo.png', static_dir / 'logo.png')

@@ -11,10 +11,10 @@ import sys
 from pathlib import Path
 import click
 from half_orm.cli_utils import create_and_register_extension
-from half_orm_gen.gen_app import GenApp
-from half_orm_gen.generate import GenApi
-from half_orm_gen.gen_app.svelte import SvelteAppGenerator
-from half_orm_gen.gen_app.angular import AngularAppGenerator
+from half_orm_gen.frontend import GenApp
+from half_orm_gen.backend.generate import GenApi
+from half_orm_gen.frontend.svelte.v5.svelte import SvelteAppGenerator
+from half_orm_gen.frontend.angular.v19.angular import AngularAppGenerator
 
 _VERSION_FILE = Path('ho_api') / '.api_version'
 

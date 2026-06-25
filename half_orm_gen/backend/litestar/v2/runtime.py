@@ -1,9 +1,9 @@
 """
-Dynamic FastAPI application builder from a halfORM model.
+Dynamic Litestar application builder from a halfORM model.
 
-Replaces code-generated ho_api/app.py route handlers with runtime-constructed
-closures. Routes are registered at server startup by reading CRUD_ACCESS from
-relation modules.
+Replaces code-generated api/app.py route handlers with runtime-constructed
+closures. No TypedDicts, no per-relation files — routes are registered at
+server startup by reading CRUD_ACCESS from relation modules.
 """
 import importlib
 import re
@@ -11,11 +11,11 @@ import sys
 import uuid
 import datetime
 import decimal
-from contextlib import asynccontextmanager
 from typing import Optional, List, Any
 
-from fastapi import FastAPI, APIRouter, HTTPException, Request
-from fastapi.websockets import WebSocket, WebSocketDisconnect
+from litestar import Litestar, get, post, put, delete, websocket, Request, WebSocket
+from litestar.exceptions import HTTPException
+from litestar.logging import LoggingConfig
 
 
 # ---------------------------------------------------------------------------
@@ -26,19 +26,19 @@ class _ConnectionManager:
     def __init__(self):
         self._sockets: set = set()
 
-    async def connect(self, ws: WebSocket) -> None:
-        await ws.accept()
-        self._sockets.add(ws)
+    async def connect(self, socket: WebSocket) -> None:
+        await socket.accept()
+        self._sockets.add(socket)
 
-    def disconnect(self, ws: WebSocket) -> None:
-        self._sockets.discard(ws)
+    def disconnect(self, socket: WebSocket) -> None:
+        self._sockets.discard(socket)
 
     async def broadcast(self, message: dict) -> None:
         import json as _json
         dead = set()
         for s in set(self._sockets):
             try:
-                await s.send_text(_json.dumps(message, default=str))
+                await s.send_data(_json.dumps(message, default=str))
             except Exception:
                 dead.add(s)
         self._sockets -= dead
@@ -48,7 +48,7 @@ _manager = _ConnectionManager()
 
 
 # ---------------------------------------------------------------------------
-# Role / access helpers  (identical logic to runtime.py)
+# Role / access helpers  (same logic as CRUD_HELPERS template)
 # ---------------------------------------------------------------------------
 
 def _get_roles(request: Request) -> list[str]:
@@ -57,7 +57,7 @@ def _get_roles(request: Request) -> list[str]:
         return roles
     token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
     if token:
-        return list(dict.fromkeys([token, 'anonymous']))
+        return list(dict.fromkeys([token, 'anonymous']))  # authenticated roles inherit anonymous
     return ['anonymous']
 
 
@@ -69,10 +69,10 @@ def _get_role_filter(crud_access: dict, verb: str, authorized_roles: list[str]) 
             continue
         rv = role_map[role]
         if rv is None:
-            return {}
+            return {}  # unrestricted access for this role — no filter
         if isinstance(rv, dict):
             if 'filter' not in rv:
-                return {}
+                return {}  # dict without filter means unrestricted
             combined.update(rv['filter'])
     return combined
 
@@ -92,7 +92,7 @@ def _effective_out_fields(
     matched = False
     for role in authorized_roles:
         if role not in role_map:
-            continue
+            continue  # role not listed — skip, don't deny
         matched = True
         rv = role_map[role]
         if isinstance(rv, dict):
@@ -103,10 +103,10 @@ def _effective_out_fields(
         else:
             out = rv
         if out is None:
-            return []
+            return []  # None means all fields allowed for this role
         fields.extend(out)
     if not matched:
-        return None
+        return None  # no matching role → deny
     return [f for f in dict.fromkeys(fields) if f not in api_excluded]
 
 
@@ -122,10 +122,10 @@ def _effective_in_fields(
     for role in authorized_roles:
         rv = role_map.get(role)
         if rv is None or not isinstance(rv, dict):
-            continue
+            continue  # role not authorized for this verb — skip
         in_val = rv.get('in')
         if in_val is None:
-            return []
+            return []  # None means all fields allowed
         fields.extend(in_val)
     return [f for f in dict.fromkeys(fields) if f not in api_excluded]
 
@@ -191,19 +191,36 @@ _KNOWN_PY_TYPES = {
     datetime.timedelta: 'datetime.timedelta',
 }
 
+_LITESTAR_PATH_TYPE_MAP = {
+    'uuid.UUID':          'uuid',
+    'int':                'int',
+    'str':                'str',
+    'float':              'float',
+    'decimal.Decimal':    'decimal',
+    'datetime.date':      'date',
+    'datetime.datetime':  'datetime',
+    'datetime.time':      'time',
+    'datetime.timedelta': 'timedelta',
+}
+
 
 def _py_type_str(py_type) -> str:
     return _KNOWN_PY_TYPES.get(py_type, str(py_type))
 
 
 def _pk_info(cls) -> list[tuple[str, str]]:
-    """Return [(field_name, py_type_str), ...] for PK columns."""
+    """Return [(field_name, litestar_path_type), ...] for PK columns."""
     pkey = getattr(cls(), '_ho_pkey', {})
-    return [(name, _py_type_str(obj.py_type)) for name, obj in pkey.items()]
+    result = []
+    for name, obj in pkey.items():
+        type_str = _py_type_str(obj.py_type)
+        litestar_type = _LITESTAR_PATH_TYPE_MAP.get(type_str, 'str')
+        result.append((name, litestar_type))
+    return result
 
 
 # ---------------------------------------------------------------------------
-# Search-query parser
+# Search-query parser  (reused by list handlers)
 # ---------------------------------------------------------------------------
 
 def _parse_q(
@@ -237,8 +254,153 @@ def _parse_q(
 
 
 # ---------------------------------------------------------------------------
-# Cascade broadcast helper
+# Route handler factories
+# Decorator applied AFTER __name__/__qualname__ are set so Litestar picks up
+# the unique name when building operation_ids for OpenAPI.
 # ---------------------------------------------------------------------------
+
+def _make_list_handler(path: str, cls, crud_access: dict, api_excluded: list, resource: str):
+    slug = resource.replace('/', '_')
+
+    async def handler(
+        request: Request,
+        fields: Optional[List[str]] = None,
+        limit: Optional[int] = 100,
+        offset: Optional[int] = 0,
+        q: Optional[str] = None,
+    ) -> dict:
+        roles = _get_roles(request)
+        filter_kwargs: dict = {}
+        search_cols: list[str] = []
+        range_filters: list = []
+        if q:
+            filter_kwargs, search_cols, range_filters = _parse_q(q, api_excluded)
+        col_filters: dict = {
+            k[7:]: v
+            for k, v in request.query_params.items()
+            if k.startswith('ho_col_') and k[7:] not in api_excluded
+        }
+        role_filter = _get_role_filter(crud_access, 'GET', roles)
+        authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded)
+        if authorized is None:
+            return {'data': [], 'meta': {'offset': offset, 'limit': limit, 'has_more': False}}
+        projection = [f for f in fields if not authorized or f in authorized] if fields else authorized
+        inst = cls(**{**filter_kwargs, **col_filters, **role_filter})
+        for col, op1, op1val, op2, op2val in range_filters:
+            field = getattr(inst, col)
+            if op1 == '>=':
+                field >= op1val
+            else:
+                field > op1val
+            if op2 == '<=':
+                field <= op2val
+            else:
+                field < op2val
+        for col in search_cols:
+            getattr(inst, col).unaccent = True
+        data = await inst.ho_aselect(*(projection or []), limit=limit, offset=offset)
+        return {'data': data, 'meta': {'offset': offset, 'limit': limit, 'has_more': len(data) == limit}}
+
+    handler.__name__ = handler.__qualname__ = f'list_{slug}'
+    return get(path)(handler)
+
+
+def _make_get_handler(
+    path: str, cls, crud_access: dict, api_excluded: list,
+    pk_info: list[tuple[str, str]], resource: str,
+):
+    pk_names = [p[0] for p in pk_info]
+    is_simple = len(pk_names) == 1
+    pk_name = pk_info[0][0]
+    slug = resource.replace('/', '_')
+
+    async def handler(request: Request, id: str) -> dict:
+        roles = _get_roles(request)
+        role_filter = _get_role_filter(crud_access, 'GET', roles)
+        authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded)
+        if authorized is None:
+            raise HTTPException(status_code=403)
+        pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
+        rows = await cls(**{**pk_filter, **role_filter}).ho_aselect(*(authorized or []))
+        if not rows:
+            raise HTTPException(status_code=404)
+        return rows[0]
+
+    handler.__name__ = handler.__qualname__ = f'get_{slug}'
+    return get(f'{path}/{{id:str}}')(handler)
+
+
+def _make_post_handler(
+    path: str, cls, crud_access: dict, api_excluded: list,
+    resource: str, pk_name: str,
+):
+    slug = resource.replace('/', '_')
+
+    async def handler(request: Request, data: dict[str, Any]) -> dict:
+        roles = _get_roles(request)
+        in_fields = _effective_in_fields(crud_access, 'POST', roles, api_excluded)
+        payload = {
+            k: v for k, v in data.items()
+            if v is not None and (not in_fields or k in in_fields)
+        }
+        result = await cls(**payload).ho_ainsert()
+        pk_val = result.get(pk_name, '') if result else ''
+        await _manager.broadcast({'event': 'create', 'resource': resource, 'id': str(pk_val)})
+        return result
+
+    handler.__name__ = handler.__qualname__ = f'create_{slug}'
+    return post(path)(handler)
+
+
+def _make_put_handler(
+    path: str, cls, crud_access: dict, api_excluded: list,
+    pk_info: list[tuple[str, str]], resource: str,
+):
+    pk_names = [p[0] for p in pk_info]
+    is_simple = len(pk_names) == 1
+    pk_name = pk_info[0][0]
+    slug = resource.replace('/', '_')
+
+    async def handler(request: Request, id: str, data: dict[str, Any]) -> dict:
+        roles = _get_roles(request)
+        in_fields = _effective_in_fields(crud_access, 'PUT', roles, api_excluded)
+        authorized = _effective_out_fields(crud_access, 'PUT', roles, api_excluded)
+        payload = {
+            k: v for k, v in data.items()
+            if v is not None and (not in_fields or k in in_fields)
+        }
+        pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
+        result = await cls(**pk_filter).ho_aupdate(*(authorized or ['*']), **payload)
+        if not result:
+            raise HTTPException(status_code=404)
+        await _manager.broadcast({'event': 'update', 'resource': resource, 'id': str(id)})
+        return result[0]
+
+    handler.__name__ = handler.__qualname__ = f'update_{slug}'
+    return put(f'{path}/{{id:str}}')(handler)
+
+
+def _make_delete_handler(
+    path: str, cls, crud_access: dict, api_excluded: list,
+    pk_info: list[tuple[str, str]], resource: str, ws_rmap: dict,
+):
+    pk_names = [p[0] for p in pk_info]
+    is_simple = len(pk_names) == 1
+    pk_name = pk_info[0][0]
+    slug = resource.replace('/', '_')
+
+    async def handler(request: Request, id: str) -> None:
+        pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
+        inst = cls(**pk_filter)
+        await _ws_broadcast_cascade(inst, resource, id, ws_rmap)
+        result = await inst.ho_adelete('*')
+        if not result:
+            raise HTTPException(status_code=404)
+        await _manager.broadcast({'event': 'delete', 'resource': resource, 'id': str(id)})
+
+    handler.__name__ = handler.__qualname__ = f'delete_{slug}'
+    return delete(f'{path}/{{id:str}}')(handler)
+
 
 async def _ws_broadcast_cascade(
     inst, resource: str, pk_val, ws_rmap: dict, _seen: set | None = None
@@ -265,7 +427,7 @@ async def _ws_broadcast_cascade(
 
 
 # ---------------------------------------------------------------------------
-# Access-map helpers
+# Access-map helpers  (used by /ho_access)
 # ---------------------------------------------------------------------------
 
 def _build_access_entry(crud_access: dict, api_excluded: list, all_field_names: list) -> dict:
@@ -332,160 +494,43 @@ def _filter_access_for_roles(access_map: dict, authorized_roles: list[str]) -> d
 
 
 # ---------------------------------------------------------------------------
-# Pydantic body model factory
+# Special endpoint factories
 # ---------------------------------------------------------------------------
 
-def _make_body_model(model, sfqrn: tuple, pk_names: list[str], api_excluded: list[str], name: str):
-    """Build a Pydantic model for POST/PUT bodies from halfORM field metadata."""
-    from pydantic import create_model, BaseModel
-    field_defs: dict = {}
-    for fname, fobj in model._fields_metadata(sfqrn).items():
-        if fname in pk_names or fname in api_excluded:
-            continue
-        py_type = getattr(fobj, 'py_type', None) or Any
-        field_defs[fname] = (Optional[py_type], None)
-    if not field_defs:
-        return BaseModel
-    return create_model(name, **field_defs)
+def _make_ho_meta(model, prefix: str):
+    @get(f'{prefix}/ho_meta')
+    async def ho_meta() -> dict:
+        return model.ho_meta()
+    return ho_meta
 
 
-# ---------------------------------------------------------------------------
-# Route handler factories
-# ---------------------------------------------------------------------------
+def _make_ho_roles(roles_list: list, prefix: str):
+    @get(f'{prefix}/ho_roles')
+    async def ho_roles() -> list:
+        return roles_list
+    return ho_roles
 
-def _make_list_handler(cls, crud_access: dict, api_excluded: list, resource: str):
-    slug = resource.replace('/', '_')
 
-    async def handler(
-        request: Request,
-        fields: Optional[List[str]] = None,
-        limit: Optional[int] = 100,
-        offset: Optional[int] = 0,
-        q: Optional[str] = None,
-    ) -> dict:
+def _make_ho_access(access_map: dict, model, prefix: str):
+    @get(f'{prefix}/ho_access')
+    async def ho_access(request: Request) -> dict:
         roles = _get_roles(request)
-        filter_kwargs: dict = {}
-        search_cols: list[str] = []
-        range_filters: list = []
-        if q:
-            filter_kwargs, search_cols, range_filters = _parse_q(q, api_excluded)
-        col_filters: dict = {
-            k[7:]: v
-            for k, v in request.query_params.items()
-            if k.startswith('ho_col_') and k[7:] not in api_excluded
-        }
-        role_filter = _get_role_filter(crud_access, 'GET', roles)
-        authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded)
-        if authorized is None:
-            return {'data': [], 'meta': {'offset': offset, 'limit': limit, 'has_more': False}}
-        projection = [f for f in fields if not authorized or f in authorized] if fields else authorized
-        inst = cls(**{**filter_kwargs, **col_filters, **role_filter})
-        for col, op1, op1val, op2, op2val in range_filters:
-            field = getattr(inst, col)
-            if op1 == '>=':
-                field >= op1val
-            else:
-                field > op1val
-            if op2 == '<=':
-                field <= op2val
-            else:
-                field < op2val
-        for col in search_cols:
-            getattr(inst, col).unaccent = True
-        data = await inst.ho_aselect(*(projection or []), limit=limit, offset=offset)
-        return {'data': data, 'meta': {'offset': offset, 'limit': limit, 'has_more': len(data) == limit}}
-
-    handler.__name__ = handler.__qualname__ = f'list_{slug}'
-    return handler
+        return _filter_access_for_roles(access_map, roles)
+    return ho_access
 
 
-def _make_get_handler(cls, crud_access: dict, api_excluded: list,
-                      pk_info: list[tuple[str, str]], resource: str):
-    pk_names = [p[0] for p in pk_info]
-    is_simple = len(pk_names) == 1
-    pk_name = pk_info[0][0]
-    slug = resource.replace('/', '_')
-
-    async def handler(request: Request, id: str) -> dict:
-        roles = _get_roles(request)
-        role_filter = _get_role_filter(crud_access, 'GET', roles)
-        authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded)
-        if authorized is None:
-            raise HTTPException(status_code=403)
-        pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
-        rows = await cls(**{**pk_filter, **role_filter}).ho_aselect(*(authorized or []))
-        if not rows:
-            raise HTTPException(status_code=404)
-        return rows[0]
-
-    handler.__name__ = handler.__qualname__ = f'get_{slug}'
-    return handler
-
-
-def _make_post_handler(cls, crud_access: dict, api_excluded: list,
-                       resource: str, pk_name: str, body_model):
-    slug = resource.replace('/', '_')
-
-    async def handler(request: Request, data: body_model) -> dict:
-        roles = _get_roles(request)
-        in_fields = _effective_in_fields(crud_access, 'POST', roles, api_excluded)
-        payload = {
-            k: v for k, v in data.model_dump(exclude_none=True).items()
-            if not in_fields or k in in_fields
-        }
-        result = await cls(**payload).ho_ainsert()
-        pk_val = result.get(pk_name, '') if result else ''
-        await _manager.broadcast({'event': 'create', 'resource': resource, 'id': str(pk_val)})
-        return result
-
-    handler.__name__ = handler.__qualname__ = f'create_{slug}'
-    return handler
-
-
-def _make_put_handler(cls, crud_access: dict, api_excluded: list,
-                      pk_info: list[tuple[str, str]], resource: str, body_model):
-    pk_names = [p[0] for p in pk_info]
-    is_simple = len(pk_names) == 1
-    pk_name = pk_info[0][0]
-    slug = resource.replace('/', '_')
-
-    async def handler(request: Request, id: str, data: body_model) -> dict:
-        roles = _get_roles(request)
-        in_fields = _effective_in_fields(crud_access, 'PUT', roles, api_excluded)
-        authorized = _effective_out_fields(crud_access, 'PUT', roles, api_excluded)
-        payload = {
-            k: v for k, v in data.model_dump(exclude_none=True).items()
-            if not in_fields or k in in_fields
-        }
-        pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
-        result = await cls(**pk_filter).ho_aupdate(*(authorized or ['*']), **payload)
-        if not result:
-            raise HTTPException(status_code=404)
-        await _manager.broadcast({'event': 'update', 'resource': resource, 'id': str(id)})
-        return result[0]
-
-    handler.__name__ = handler.__qualname__ = f'update_{slug}'
-    return handler
-
-
-def _make_delete_handler(cls, crud_access: dict, api_excluded: list,
-                         pk_info: list[tuple[str, str]], resource: str, ws_rmap: dict):
-    pk_names = [p[0] for p in pk_info]
-    is_simple = len(pk_names) == 1
-    pk_name = pk_info[0][0]
-    slug = resource.replace('/', '_')
-
-    async def handler(request: Request, id: str) -> None:
-        pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
-        inst = cls(**pk_filter)
-        await _ws_broadcast_cascade(inst, resource, id, ws_rmap)
-        result = await inst.ho_adelete('*')
-        if not result:
-            raise HTTPException(status_code=404)
-        await _manager.broadcast({'event': 'delete', 'resource': resource, 'id': str(id)})
-
-    handler.__name__ = handler.__qualname__ = f'delete_{slug}'
-    return handler
+def _make_ws_handler(version_prefix: str):
+    @websocket(f'{version_prefix}/ws')
+    async def ws_handler(socket: WebSocket) -> None:
+        await _manager.connect(socket)
+        try:
+            while True:
+                await socket.receive_data(mode='text')
+        except Exception:
+            pass
+        finally:
+            _manager.disconnect(socket)
+    return ws_handler
 
 
 # ---------------------------------------------------------------------------
@@ -515,20 +560,22 @@ def build_crud_app(
     model,
     module_name: str = '',
     api_version: int | None = None,
-    **fastapi_kwargs,
-) -> FastAPI:
+    middleware: list | None = None,
+    route_handlers: list | None = None,
+    **litestar_kwargs,
+) -> Litestar:
     """
-    Build a FastAPI application dynamically from a halfORM model.
+    Build a Litestar application dynamically from a halfORM model.
 
     Reads CRUD_ACCESS from relation modules at startup and registers
     routes programmatically — no code generation needed.
     """
     prefix = f'/v{api_version}' if api_version is not None else ''
 
-    router = APIRouter()
     access_map: dict = {}
     roles_set: set[str] = {'ho_dev'}
     ws_rmap: dict = {}
+    relation_handlers: list = []
 
     for cls, _kind in model.classes():
         try:
@@ -549,18 +596,19 @@ def build_crud_app(
         path     = f'{prefix}/{resource}'
         pk_info  = _pk_info(cls)
 
+        # Field names for access-map building
         sfqrn = inst._t_fqrn
         all_field_names = list(model._fields_metadata(sfqrn).keys())
-        pk_names = [p[0] for p in pk_info]
-        slug = resource.replace('/', '_')
-        body_model = _make_body_model(model, sfqrn, pk_names, api_excluded, f'Body_{slug}')
 
+        # Populate roles set
         for verb_roles in crud_access.values():
             if isinstance(verb_roles, dict):
                 roles_set.update(verb_roles.keys())
 
+        # Build access map entry
         access_entry = _build_access_entry(crud_access, api_excluded, all_field_names)
 
+        # Add ho_dev entries when not in production
         if not model._production_mode and access_entry:
             all_f = [f for f in all_field_names if f not in api_excluded]
             for verb in ('GET', 'POST', 'PUT', 'DELETE'):
@@ -577,9 +625,13 @@ def build_crud_app(
         if access_entry:
             access_map[resource] = access_entry
 
+        # Register WS cascade entry (simple PK only)
         if pk_info and len(pk_info) == 1:
             ws_rmap[resource] = (cls, pk_info[0][0])
 
+        # Build route handlers based on declared verbs.
+        # When no CRUD_ACCESS is defined, still register routes in dev mode so
+        # ho_dev (super-role) can inspect any relation without configuration.
         dev_fallback = no_crud and not model._production_mode
         has_get    = bool(crud_access.get('GET'))    or dev_fallback
         has_post   = bool(crud_access.get('POST'))   or dev_fallback
@@ -587,68 +639,43 @@ def build_crud_app(
         has_delete = bool(crud_access.get('DELETE')) or dev_fallback
 
         if has_get:
-            router.add_api_route(
-                path,
-                _make_list_handler(cls, crud_access, api_excluded, resource),
-                methods=['GET'],
+            relation_handlers.append(
+                _make_list_handler(path, cls, crud_access, api_excluded, resource)
             )
             if pk_info:
-                router.add_api_route(
-                    f'{path}/{{id}}',
-                    _make_get_handler(cls, crud_access, api_excluded, pk_info, resource),
-                    methods=['GET'],
+                relation_handlers.append(
+                    _make_get_handler(path, cls, crud_access, api_excluded, pk_info, resource)
                 )
 
         if has_post and pk_info:
-            router.add_api_route(
-                path,
-                _make_post_handler(cls, crud_access, api_excluded, resource, pk_info[0][0], body_model),
-                methods=['POST'],
+            relation_handlers.append(
+                _make_post_handler(path, cls, crud_access, api_excluded, resource, pk_info[0][0])
             )
 
         if has_put and pk_info:
-            router.add_api_route(
-                f'{path}/{{id}}',
-                _make_put_handler(cls, crud_access, api_excluded, pk_info, resource, body_model),
-                methods=['PUT'],
+            relation_handlers.append(
+                _make_put_handler(path, cls, crud_access, api_excluded, pk_info, resource)
             )
 
         if has_delete and pk_info:
-            router.add_api_route(
-                f'{path}/{{id}}',
-                _make_delete_handler(cls, crud_access, api_excluded, pk_info, resource, ws_rmap),
-                methods=['DELETE'],
+            relation_handlers.append(
+                _make_delete_handler(path, cls, crud_access, api_excluded, pk_info, resource, ws_rmap)
             )
 
     roles_list = sorted(roles_set - {'ho_dev', 'anonymous'})
 
-    # Special routes
-    @router.get(f'{prefix}/ho_meta')
-    async def ho_meta() -> dict:
-        return model.ho_meta()
+    special_handlers = [
+        _make_ho_meta(model, prefix),
+        _make_ho_roles(roles_list, prefix),
+        _make_ho_access(access_map, model, prefix),
+        _make_ws_handler(prefix),
+    ]
 
-    @router.get(f'{prefix}/ho_roles')
-    async def ho_roles() -> list:
-        return roles_list
+    logging_config = LoggingConfig(
+        loggers={'app': {'level': 'ERROR', 'handlers': ['queue_listener']}}
+    )
 
-    @router.get(f'{prefix}/ho_access')
-    async def ho_access(request: Request) -> dict:
-        roles = _get_roles(request)
-        return _filter_access_for_roles(access_map, roles)
-
-    @router.websocket(f'{prefix}/ws')
-    async def ws_handler(ws: WebSocket) -> None:
-        await _manager.connect(ws)
-        try:
-            while True:
-                await ws.receive_text()
-        except WebSocketDisconnect:
-            pass
-        finally:
-            _manager.disconnect(ws)
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def _startup() -> None:
         global _HO_WARN_SHOWN
         await model.aconnect()
         if model._production_mode:
@@ -660,15 +687,11 @@ def build_crud_app(
         if not _HO_WARN_SHOWN:
             print(_HO_WARN, file=sys.stderr, flush=True)
             _HO_WARN_SHOWN = True
-        yield
 
-    app = FastAPI(lifespan=lifespan, **fastapi_kwargs)
-    app.include_router(router)
-
-    try:
-        from ho_api.custom.routes import router as _custom_router
-        app.include_router(_custom_router)
-    except ImportError:
-        pass
-
-    return app
+    return Litestar(
+        route_handlers=special_handlers + relation_handlers + (route_handlers or []),
+        middleware=middleware or [],
+        logging_config=logging_config,
+        on_startup=[_startup],
+        **litestar_kwargs,
+    )

@@ -1,5 +1,5 @@
-from half_orm_gen.crud_routes import _py_type_str
-from half_orm_gen.gen_store.base import StoreGenerator
+from half_orm_gen.backend.crud_routes import _py_type_str
+from half_orm_gen.frontend.base import StoreGenerator
 
 
 def _store(

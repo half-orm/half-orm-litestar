@@ -12,14 +12,14 @@ import importlib
 import shutil
 from pathlib import Path
 
-from half_orm_gen.crud_routes import (
+from half_orm_gen.backend.crud_routes import (
     _gen_out_fields,
     _gen_in_fields,
     _simple_pk,
     _pk_info,
     _instance,
 )
-from half_orm_gen.gen_store.base import StoreGenerator
+from half_orm_gen.frontend.base import StoreGenerator
 
 from ._static import (
     _PACKAGE_JSON, _ANGULAR_JSON, _TSCONFIG, _TSCONFIG_APP, _INDEX_HTML,
@@ -178,8 +178,8 @@ class AngularAppGenerator(StoreGenerator):
         stores_dir.mkdir(parents=True, exist_ok=True)
 
         # --- shared filters module ---
-        package_dir = Path(__file__).parents[4]
-        filters_src = package_dir / 'templates_filters.ts'
+        frontend_dir = Path(__file__).parents[2]
+        filters_src = frontend_dir / 'templates_filters.ts'
         if filters_src.exists():
             shutil.copy2(filters_src, stores_dir / 'filters.ts')
             print(f'  {stores_dir / "filters.ts"}')
@@ -195,7 +195,7 @@ class AngularAppGenerator(StoreGenerator):
                 print(f'  {generated_dir / fname}')
 
         # --- static assets (served from public/ per angular.json) ---
-        assets_src = package_dir / 'assets'
+        assets_src = Path(__file__).parents[3] / 'assets'
         public_dir = output_dir / 'public'
         public_dir.mkdir(parents=True, exist_ok=True)
         for asset in ('logo.png', 'angular_200x200.png'):

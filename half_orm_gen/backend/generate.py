@@ -7,8 +7,6 @@ Scaffolds ho_api/ and boots dynamic runtime (Litestar or FastAPI).
 import os
 from pathlib import Path
 
-from half_orm_gen.scaffold import scaffold_api_dir
-
 
 class GenApi:
     """
@@ -58,15 +56,15 @@ class GenApi:
         os.environ.setdefault('API_GEN_MODE', '1')
         framework_label = f' ({self._framework})' if self._framework != 'litestar' else ''
         print(f'\nScaffolding {self._api_dir}{framework_label} ...')
+        if self._framework == 'fastapi':
+            from half_orm_gen.backend.fastapi.v0.scaffold import scaffold_api_dir
+            runtime_mod = 'half_orm_gen.backend.fastapi.v0.runtime'
+        else:
+            from half_orm_gen.backend.litestar.v2.scaffold import scaffold_api_dir
+            runtime_mod = 'half_orm_gen.backend.litestar.v2.runtime'
         scaffold_api_dir(
             self._api_dir,
             module_name=self._module_name,
             api_version=self._api_version,
-            framework=self._framework,
-        )
-        runtime_mod = (
-            'half_orm_gen.runtime_fastapi'
-            if self._framework == 'fastapi'
-            else 'half_orm_gen.runtime'
         )
         print(f'\nDone. Routes are loaded dynamically at startup via {runtime_mod}.')

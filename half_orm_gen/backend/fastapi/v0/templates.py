@@ -6,7 +6,7 @@ Only auto-CRUD routes (CRUD_ACCESS) are supported; @api_* decorators are
 Litestar-specific and are ignored in FastAPI mode.
 """
 
-from half_orm_gen.templates import CRUD_HELPERS, CRUD_MODULE_IMPORT
+from half_orm_gen.backend.templates import CRUD_HELPERS, CRUD_MODULE_IMPORT
 
 FRAMEWORK = 'fastapi'
 

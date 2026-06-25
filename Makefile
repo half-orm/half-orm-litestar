@@ -19,6 +19,12 @@ check-repo-clean:
 		exit 1; \
 	fi
 
+.PHONY: clean
+clean:
+	find . -type f -name '*.pyc' -delete
+	find . -type d -name '__pycache__' -exec rm -rf {} +
+	rm -rf dist build *.egg-info .coverage htmlcov
+
 .PHONY: clean_build
 clean_build:
 	rm -rf dist

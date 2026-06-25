@@ -19,27 +19,55 @@ The backend is a **Litestar** application built dynamically at startup from a ha
 No code is generated per relation — routes are registered at runtime by reading
 `CRUD_ACCESS` from each relation module.
 
-**File**: `half_orm_gen/runtime.py`  
-**Entry point**: `build_crud_app(model, module_name, api_version, middleware, **litestar_kwargs)`
+**File**: `half_orm_gen/backend/litestar/v2/runtime.py`  
+**Entry point**: `build_crud_app(model, module_name, api_version, middleware, route_handlers, **litestar_kwargs)`
 
-`half_orm gen api --litestar` only scaffolds the `api/` directory once (guards, custom
-routes stub, `app.py` importing `build_crud_app`). Subsequent `gen api` calls are no-ops
-for existing projects — all routing logic lives in `runtime.py`.
+`half_orm gen api --litestar` writes `ho_api/app.py` on every run (always regenerated).
+The file imports `build_crud_app` and uses conditional imports for developer customisations:
 
-## FastAPI (legacy)
+```python
+try:
+    from ho_api.custom.middlewares.authorization import Authorization
+    _middleware = [Authorization]
+except ImportError:
+    pass
 
-`half_orm gen api --fastapi` generates a single `api/app.py` file containing all route
-handlers as explicit Python functions with typed `TypedDict` models, one block per relation.
-This file is **regenerated** on every `gen api` call. Custom logic must go in
-`api/custom/routes.py` which is imported at the bottom of `app.py`.
+try:
+    from ho_api.custom.routes import routes as _route_handlers
+except ImportError:
+    pass
 
-The FastAPI path uses `half_orm_gen/crud_routes.py` (route builder) and
-`half_orm_gen/templates_fastapi.py` (code templates). These files are not involved in the
-Litestar path.
+application = build_crud_app(MODEL, ..., middleware=_middleware, route_handlers=_route_handlers)
+```
+
+Developer-owned files (`custom/middlewares/authorization.py`, `custom/routes.py`) are never
+touched by the generator — create them manually when needed.
+
+## FastAPI
+
+`half_orm gen api --fastapi` also regenerates `ho_api/app.py` on every run.
+Custom routes are passed via `extra_routers`:
+
+```python
+try:
+    from ho_api.custom.routes import router as _custom_router
+    _extra_routers = [_custom_router]
+except ImportError:
+    pass
+
+application = build_crud_app(MODEL, ..., extra_routers=_extra_routers)
+```
+
+**File**: `half_orm_gen/backend/fastapi/v0/runtime.py`  
+**Entry point**: `build_crud_app(model, module_name, api_version, extra_routers, **fastapi_kwargs)`
+
+The FastAPI path uses `half_orm_gen/backend/crud_routes.py` (route builder) and
+`half_orm_gen/backend/fastapi/v0/templates.py` (code templates). These files are not
+involved in the Litestar path.
 
 ---
 
-The rest of this document describes the **Litestar runtime** (`runtime.py`).
+The rest of this document describes the **Litestar runtime** (`backend/litestar/v2/runtime.py`).
 
 ---
 
@@ -222,7 +250,7 @@ for cls in model.classes():
 assemble Litestar(
   special_handlers    # ho_meta, ho_roles, ho_access, ws
   + relation_handlers # per-relation CRUD
-  + custom_handlers   # api/custom/routes.py (optional)
+  + route_handlers    # ho_api/custom/routes.py (optional, passed from app.py)
 )
 ```
 
@@ -239,7 +267,7 @@ assemble Litestar(
 
 ## Custom routes
 
-Drop a `routes` list in `api/custom/routes.py`:
+Drop a `routes` list in `ho_api/custom/routes.py`:
 
 ```python
 from litestar import get
@@ -251,5 +279,17 @@ async def my_handler() -> dict:
 routes = [my_handler]
 ```
 
-These are appended to the Litestar handler list after the generated routes.
-If the file is absent the import silently fails and no custom routes are added.
+`ho_api/app.py` imports this list conditionally — if the file is absent the import silently
+fails and no custom routes are added. The file is never touched by the generator.
+
+For FastAPI, expose an `APIRouter` as `router` instead:
+
+```python
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.get('/my-custom-endpoint')
+async def my_handler() -> dict:
+    return {'hello': 'world'}
+```

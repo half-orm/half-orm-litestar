@@ -1,4 +1,4 @@
-from half_orm_gen.crud_routes import _py_type_str
+from half_orm_gen.backend.crud_routes import _py_type_str
 from ._helpers import _selector, _title, _field_type_category
 
 
