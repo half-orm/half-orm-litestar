@@ -3,8 +3,8 @@ CLI extension for half-orm-gen.
 
 Registers the ``gen`` sub-command group under the ``half_orm`` CLI::
 
-    half_orm gen api
-    half_orm gen frontend
+    half_orm gen api      → ho_api/
+    half_orm gen frontend → ho_frontend/<framework>/
 """
 
 import sys
@@ -16,7 +16,7 @@ from half_orm_gen.generate import GenApi
 from half_orm_gen.gen_app.svelte import SvelteAppGenerator
 from half_orm_gen.gen_app.angular import AngularAppGenerator
 
-_VERSION_FILE = Path('api') / '.api_version'
+_VERSION_FILE = Path('ho_api') / '.api_version'
 
 
 def _read_api_version() -> int:
@@ -53,11 +53,11 @@ def add_commands(main_group):
     @click.option('--fastapi', 'framework', flag_value='fastapi',
                   help='Generate a FastAPI app (no @api_* support).')
     def api(dry_run, bump, framework):
-        """Generate api/app.py from CRUD_ACCESS and @api_* decorated methods.
+        """Generate ho_api/app.py from CRUD_ACCESS and @api_* decorated methods.
 
-        The API version is read from api/.api_version (default: 0).
+        The API version is read from ho_api/.api_version (default: 0).
         Use --bump to move to N+1; the new value is saved for future runs.
-        To revert a mistaken bump: git checkout api/.api_version.
+        To revert a mistaken bump: git checkout ho_api/.api_version.
 
         Must be run from inside a half-orm-dev project directory.
         On first run, missing scaffolding files (guards.py, custom/) are
@@ -100,7 +100,7 @@ def add_commands(main_group):
 
         if dry_run:
             click.echo(
-                f'[dry-run] would generate api/app.py ({framework}) for project: {repo.name}'
+                f'[dry-run] would generate ho_api/app.py ({framework}) for project: {repo.name}'
                 f' (v{api_version})'
             )
             return
@@ -108,9 +108,9 @@ def add_commands(main_group):
         click.echo(f'Generating {framework} API for project: {repo.name} (v{api_version})')
         GenApi(repo, api_version=api_version, framework=framework)
         if framework == 'litestar':
-            click.echo('\nTo run:  litestar --app api.app:application run --reload')
+            click.echo('\nTo run:  litestar --app ho_api.app:application run --reload')
         else:
-            click.echo('\nTo run:  uvicorn api.app:application --reload')
+            click.echo('\nTo run:  uvicorn ho_api.app:application --reload')
 
     @gen.command('frontend')
     @click.option('--svelte',   'framework', flag_value='svelte',
@@ -149,7 +149,7 @@ def add_commands(main_group):
             sys.exit(1)
 
         api_version = _read_api_version()
-        output_dir = Path(output) if output else Path('frontend') / framework
+        output_dir = Path(output) if output else Path('ho_frontend') / framework
 
         if not framework:
             click.echo('Error: specify --svelte or --angular.', err=True)

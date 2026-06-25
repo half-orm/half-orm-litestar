@@ -4,7 +4,7 @@ Litestar API generator for halfORM projects.
 Orchestrates generation of api/app.py by combining:
 - @api_* decorated route handlers  (api_routes.py)
 - Auto-CRUD handlers from CRUD_ACCESS  (crud_routes.py)
-- Scaffolding of missing api/ files  (scaffold.py)
+- Scaffolding of missing ho_api/ files  (scaffold.py)
 """
 
 import os
@@ -21,7 +21,7 @@ from half_orm_gen.crud_routes import generate_crud_routes
 
 class GenApi:
     """
-    Generate ``api/app.py`` from a halfORM project.
+    Generate ``ho_api/app.py`` from a halfORM project.
 
     Parameters
     ----------
@@ -34,7 +34,7 @@ class GenApi:
     module_name:
         Top-level Python package name of the halfORM model (e.g. ``"mydb"``).
     base_dir:
-        Root directory of the project (``api/`` is created inside it).
+        Root directory of the project (``ho_api/`` is created inside it).
     api_version:
         Integer API version (written as ``/vN/`` prefix in routes).
     """
@@ -64,7 +64,7 @@ class GenApi:
 
         self._api_version = api_version
         self._framework = framework
-        self._api_dir = self._base_dir / 'api'
+        self._api_dir = self._base_dir / 'ho_api'
         self._generate()
 
     def _generate(self) -> None:

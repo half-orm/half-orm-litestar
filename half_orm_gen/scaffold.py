@@ -1,7 +1,7 @@
 """
 Scaffolding helpers for half-orm-litestar.
 
-Creates missing api/ files on first generate. Never overwrites existing files.
+Creates missing ho_api/ files on first generate. Never overwrites existing files.
 """
 
 import shutil
@@ -11,7 +11,7 @@ _SCAFFOLDING_DIR = Path(__file__).parent / 'scaffolding'
 
 
 def scaffold_api_dir(api_dir: Path, module_name: str = '', api_version: int | None = None) -> None:
-    """Create missing api/ scaffolding files. Never overwrites existing files."""
+    """Create missing ho_api/ scaffolding files. Never overwrites existing files."""
     files = {
         api_dir / 'guards.py':
             _SCAFFOLDING_DIR / 'guards.py',
