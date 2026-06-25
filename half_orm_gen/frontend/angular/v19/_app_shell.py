@@ -148,9 +148,6 @@ const API_BASE = '{api_base}';
               }}
             </nav>
             <div class="px-4 py-3 border-t flex items-center justify-between">
-              <a routerLink="/">
-                <img src="/logo.png" alt="halfORM" class="h-10 w-auto opacity-80 hover:opacity-100 transition-opacity" />
-              </a>
               <a routerLink="/schema" routerLinkActive="text-blue-600"
                  class="text-gray-400 hover:text-blue-600 transition-colors" title="Schema">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">

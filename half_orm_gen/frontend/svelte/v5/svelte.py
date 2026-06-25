@@ -257,8 +257,9 @@ def _login_page(version_prefix: str) -> str:
 def _home_page() -> str:
     return """\
 <div class="flex flex-col items-center justify-center h-screen bg-gray-50">
-  <div class="flex items-center gap-6 mb-6">
+  <div class="relative group flex items-center gap-6 mb-6">
     <img src="/logo.png" alt="halfORM" class="h-30 w-auto" />
+    <img src="/logo-chapeau.png" alt="" class="absolute inset-0 h-30 w-auto transition-opacity duration-[2000ms] opacity-100 group-hover:opacity-0" />
   </div>
   <h1 class="text-3xl font-bold text-gray-800 mb-2">halfORM Backoffice</h1>
   <div class="text-gray-500">Powered by SvelteKit</div>
@@ -621,9 +622,6 @@ def _layout(resources: list, version_prefix: str = '') -> str:
         {{/each}}
       </nav>
       <div class="px-4 py-3 border-t flex items-center justify-between">
-        <a href="/">
-          <img src="/logo.png" alt="halfORM" class="h-10 w-auto opacity-80 hover:opacity-100 transition-opacity" />
-        </a>
         <a href="/schema" title="Schema"
            class="transition-colors {{page.url.pathname === '/schema' ? 'text-blue-600' : 'text-gray-400 hover:text-blue-600'}}">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
@@ -1702,6 +1700,7 @@ class SvelteAppGenerator(StoreGenerator):
         static_dir = output_dir / 'static'
         static_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(assets_src / 'logo.png', static_dir / 'logo.png')
+        shutil.copy2(assets_src / 'logo-chapeau.png', static_dir / 'logo-chapeau.png')
 
         # --- layout + home ---
         routes_dir     = output_dir / 'src' / 'routes'

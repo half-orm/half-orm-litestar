@@ -198,7 +198,7 @@ class AngularAppGenerator(StoreGenerator):
         assets_src = Path(__file__).parents[3] / 'assets'
         public_dir = output_dir / 'public'
         public_dir.mkdir(parents=True, exist_ok=True)
-        for asset in ('logo.png', 'angular_200x200.png'):
+        for asset in ('logo.png', 'logo-chapeau.png', 'angular_200x200.png'):
             shutil.copy2(assets_src / asset, public_dir / asset)
 
         # --- app routes + app component ---

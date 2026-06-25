@@ -83,6 +83,14 @@ def add_commands(main_group):
             )
             sys.exit(1)
 
+        if repo.database is None:
+            click.echo(
+                'Error: no halfORM project found in this directory or any parent.\n'
+                'Make sure you are inside a half-orm-dev project directory.',
+                err=True,
+            )
+            sys.exit(1)
+
         if not framework:
             click.echo('Error: specify --litestar or --fastapi.', err=True)
             sys.exit(1)
@@ -143,6 +151,14 @@ def add_commands(main_group):
         except Exception as exc:
             click.echo(
                 f'Error: could not load the halfORM project ({exc}).\n'
+                'Make sure you are inside a half-orm-dev project directory.',
+                err=True,
+            )
+            sys.exit(1)
+
+        if repo.database is None:
+            click.echo(
+                'Error: no halfORM project found in this directory or any parent.\n'
                 'Make sure you are inside a half-orm-dev project directory.',
                 err=True,
             )
