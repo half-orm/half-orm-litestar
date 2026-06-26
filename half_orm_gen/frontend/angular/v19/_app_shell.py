@@ -163,6 +163,10 @@ const API_BASE = '{api_base}';
               }}
             </nav>
             <div class="px-4 py-3 border-t flex items-center justify-between">
+              @if (auth.token() === 'admin' || auth.token() === 'ho_dev') {{
+                <a routerLink="/ho_bo/admin" routerLinkActive="text-blue-600"
+                   class="text-gray-400 hover:text-blue-600 transition-colors text-xs font-medium" title="Admin">⚙</a>
+              }}
               <a routerLink="/schema" routerLinkActive="text-blue-600"
                  class="text-gray-400 hover:text-blue-600 transition-colors" title="Schema">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-6 h-6">
@@ -260,9 +264,30 @@ export function authGuard(): boolean {
 """
 
 
-def _app_routes(resources: list, first_route: str) -> str:
+def _admin_guard_ts() -> str:
+    return """\
+import { inject } from '@angular/core';
+import { Router } from '@angular/router';
+import { AuthService } from './auth.service';
+
+export function adminGuard(): boolean {
+  const auth  = inject(AuthService);
+  const router = inject(Router);
+  const token  = auth.token();
+  if (token === 'admin' || token === 'ho_dev') return true;
+  void router.navigate(['/ho_bo']);
+  return false;
+}
+"""
+
+
+def _app_routes(resources: list, first_route: str, *, include_admin: bool = False) -> str:
     lines = [
         "import { Routes } from '@angular/router';",
+    ]
+    if include_admin:
+        lines.append("import { adminGuard } from './core/admin.guard';")
+    lines += [
         '',
         'export const routes: Routes = [',
         "  { path: '', loadComponent: () => import('./pages/home/home.component').then(m => m.HomeComponent) },",
@@ -271,6 +296,10 @@ def _app_routes(resources: list, first_route: str) -> str:
         "  { path: 'access', loadComponent: () => import('./pages/access/access.component').then(m => m.AccessComponent) },",
         "  { path: 'schema', loadComponent: () => import('./pages/schema/schema.component').then(m => m.SchemaComponent) },",
     ]
+    if include_admin:
+        lines.append(
+            "  { path: 'ho_bo/admin', loadComponent: () => import('./generated/ho_admin/ho_admin.component').then(m => m.HoAdminComponent), canActivate: [adminGuard] },"
+        )
     for sn, tn, _, has_post, _, pk_info, *__ in resources:
         cn   = _cname(sn, tn)
         stem = f'{sn}_{tn}'

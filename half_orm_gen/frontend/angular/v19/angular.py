@@ -28,9 +28,10 @@ from ._static import (
     _APP_CONFIG_TS, _STATE_REGISTRY, _proxy_conf, _GITIGNORE,
 )
 from ._app_shell import (
-    _auth_service, _app_component, _auth_guard_ts, _app_routes,
+    _auth_service, _app_component, _auth_guard_ts, _admin_guard_ts, _app_routes,
     _login_component, _access_component,
 )
+from ._ho_admin import _ho_admin_component_ts
 from ._pages import _home_component_ts, _schema_component_ts
 from ._specs import _schema_component_spec_ts
 from ._list_component import _list_component
@@ -252,8 +253,9 @@ class AngularAppGenerator(StoreGenerator):
                 crud_access=crud_access, api_excluded=api_excluded,
             ))
 
-        # --- auth guard ---
-        self._write(app_dir / 'core' / 'auth.guard.ts', _auth_guard_ts())
+        # --- guards ---
+        self._write(app_dir / 'core' / 'auth.guard.ts',  _auth_guard_ts())
+        self._write(app_dir / 'core' / 'admin.guard.ts', _admin_guard_ts(), once=True)
 
         # --- stores ---
         stores_dir = app_dir / 'generated' / 'stores'
@@ -289,6 +291,12 @@ class AngularAppGenerator(StoreGenerator):
         for asset in ('logo.png', 'logo-chapeau.png', 'angular_200x200.png'):
             shutil.copy2(assets_src / asset, public_dir / asset)
 
+        # --- admin component (regenerated) ---
+        admin_dir = app_dir / 'generated' / 'ho_admin'
+        admin_dir.mkdir(parents=True, exist_ok=True)
+        self._write(admin_dir / 'ho_admin.component.ts',
+                    _ho_admin_component_ts(version_prefix))
+
         # --- app routes + app component ---
         route_meta = [
             (r.schema_name, r.table_name, r.map_key, r.has_post, r.has_put, r.has_detail)
@@ -299,7 +307,7 @@ class AngularAppGenerator(StoreGenerator):
             if resources else '/ho_bo'
         )
         self._write(app_dir / 'app.routes.ts',
-                    _app_routes(route_meta, first_route))
+                    _app_routes(route_meta, first_route, include_admin=True))
         self._write(app_dir / 'app.component.ts',
                     _app_component([(r.schema_name, r.table_name) for r in resources],
                                    version_prefix=version_prefix))

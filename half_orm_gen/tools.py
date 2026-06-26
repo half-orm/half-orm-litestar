@@ -64,3 +64,25 @@ api_post   = create_api_decorator('POST',   post)
 api_put    = create_api_decorator('PUT',    put)
 api_delete = create_api_decorator('DELETE', delete)
 api_patch  = create_api_decorator('PATCH',  patch)
+
+
+def ho_api_role(name: str):
+    """Mark a method as a dynamic role resolver for CRUD access control.
+
+    The method receives (self, request) and returns a list of accessible PKs.
+    """
+    def decorator(fn):
+        fn._ho_api_role = name
+        return fn
+    return decorator
+
+
+def ho_api_filter(name: str):
+    """Mark a method as a named row filter for CRUD queries.
+
+    The method applies conditions on self (Relation instance) and returns self.
+    """
+    def decorator(fn):
+        fn._ho_api_filter = name
+        return fn
+    return decorator

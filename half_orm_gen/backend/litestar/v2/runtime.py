@@ -654,11 +654,13 @@ def build_crud_app(
                 _make_delete_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, pk_info, ws_rmap)
             )
 
+    from half_orm_gen.backend.litestar.v2.ho_admin import make_ho_admin_handlers
     special_handlers = [
         _make_ho_meta(model, prefix),
         _make_ho_roles(roles_holder, prefix),
         _make_ho_access(access_map_holder, model, prefix),
         _make_ws_handler(prefix),
+        *make_ho_admin_handlers(model, prefix, crud_access_by_res, api_excluded_by_res, access_map_holder),
     ]
 
     logging_config = LoggingConfig(
@@ -680,6 +682,9 @@ def build_crud_app(
 
         await ensure_system_roles(model)
         await reconcile_catalog(model)
+
+        from half_orm_gen.backend.ho_api.registry import discover_and_register
+        await discover_and_register(model, model.classes())
 
         roles_set: set[str] = {'ho_dev'}
         access_map: dict = {}

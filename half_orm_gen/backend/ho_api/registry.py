@@ -1,29 +1,15 @@
 """
-Registry for @ho_api_role dynamic role methods.
+Internal registries for @ho_api_role and @ho_api_filter methods.
 
-Usage in a relation module:
-    from half_orm_gen.backend.ho_api import ho_api_role
-
-    class Post(BasePost):
-        @ho_api_role('author')
-        async def _author_posts(self, request) -> list:
-            self.author_id.set(request.state.user_id)
-            return [elt['id'] async for elt in self.ho_aselect('id')]
+Decorators are defined in half_orm_gen.tools (public API).
+This module holds the runtime registries and the startup discovery function.
 """
 
 _ROLE_REGISTRY: dict[tuple[str, str, str], callable] = {}
+# key: (schema, table, role_name)
 
-
-def ho_api_role(name: str):
-    """Decorator that registers a dynamic role method on a Relation subclass.
-
-    The method receives (self, request) and returns a list of accessible PKs.
-    Results are included in CRUD responses under the 'ho_roles' key.
-    """
-    def decorator(fn):
-        fn._ho_api_role = name
-        return fn
-    return decorator
+_FILTER_REGISTRY: dict[tuple[str, str, str], callable] = {}
+# key: (schema, table, filter_name)
 
 
 def register_relation_roles(cls):
@@ -38,3 +24,36 @@ def register_relation_roles(cls):
         role_name = getattr(attr, '_ho_api_role', None)
         if role_name:
             _ROLE_REGISTRY[(schema, table, role_name)] = attr
+
+
+async def discover_and_register(model, classes) -> None:
+    """Scan user modules for @ho_api_role / @ho_api_filter, populate registries and DB."""
+    import importlib
+    from half_orm_gen.backend.ho_api.models import HoApiModels
+    api = HoApiModels(model)
+    Role   = api.role()
+    Filter = api.filter()
+    for cls, _kind in classes:
+        try:
+            mod = importlib.import_module(cls.__module__)
+        except ModuleNotFoundError:
+            continue
+        user_cls = getattr(mod, cls.__name__, cls)
+        try:
+            inst = user_cls()
+            schema = inst._t_fqrn[1]
+            table  = inst._t_fqrn[2]
+        except Exception:
+            continue
+        for attr in vars(user_cls).values():
+            role_name = getattr(attr, '_ho_api_role', None)
+            if role_name:
+                _ROLE_REGISTRY[(schema, table, role_name)] = attr
+                if not await Role()(name=role_name).ho_aselect('name'):
+                    await Role()(name=role_name, deletable=True).ho_ainsert()
+            filter_name = getattr(attr, '_ho_api_filter', None)
+            if filter_name:
+                _FILTER_REGISTRY[(schema, table, filter_name)] = attr
+                rows = await Filter()(schema_name=schema, table_name=table, name=filter_name).ho_aselect('id')
+                if not rows:
+                    await Filter()(schema_name=schema, table_name=table, name=filter_name).ho_ainsert()
