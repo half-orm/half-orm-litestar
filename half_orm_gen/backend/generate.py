@@ -2,10 +2,28 @@
 API generator for halfORM projects.
 
 Scaffolds ho_api/ and boots dynamic runtime (Litestar or FastAPI).
+Also ensures the "half_orm_meta.api" schema exists in the database.
 """
 
 import os
 from pathlib import Path
+
+
+def _ensure_ho_api_schema(model) -> None:
+    """Create the "half_orm_meta.api" schema and seed system roles + catalog."""
+    import asyncio
+    from half_orm_gen.backend.ho_api.ddl import HO_API_DDL
+    from half_orm_gen.backend.ho_api.loader import ensure_system_roles, reconcile_catalog
+    model.execute_query(HO_API_DDL)
+    model.reconnect(reload=True)
+
+    async def _run():
+        await model.aconnect()
+        await ensure_system_roles(model)
+        await reconcile_catalog(model)
+
+    asyncio.run(_run())
+    print('  ensured  "half_orm_meta.api" schema')
 
 
 class GenApi:
@@ -36,6 +54,7 @@ class GenApi:
         api_version: int | None = None,
         framework: str = 'litestar',
     ):
+        self._model = repo.model if repo is not None else None
         if repo is not None:
             self._module_name = repo.name
             self._base_dir = Path(repo.base_dir)
@@ -54,6 +73,8 @@ class GenApi:
 
     def _generate(self) -> None:
         os.environ.setdefault('API_GEN_MODE', '1')
+        if self._model is not None:
+            _ensure_ho_api_schema(self._model)
         framework_label = f' ({self._framework})' if self._framework != 'litestar' else ''
         print(f'\nScaffolding {self._api_dir}{framework_label} ...')
         if self._framework == 'fastapi':

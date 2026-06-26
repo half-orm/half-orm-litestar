@@ -3,7 +3,7 @@ Dynamic Litestar application builder from a halfORM model.
 
 Replaces code-generated api/app.py route handlers with runtime-constructed
 closures. No TypedDicts, no per-relation files — routes are registered at
-server startup by reading CRUD_ACCESS from relation modules.
+server startup by reading access configuration from "half_orm_meta.api" tables.
 """
 import importlib
 import re
@@ -16,6 +16,12 @@ from typing import Optional, List, Any
 from litestar import Litestar, get, post, put, delete, websocket, Request, WebSocket
 from litestar.exceptions import HTTPException
 from litestar.logging import LoggingConfig
+
+from half_orm_gen.backend.ho_api.loader import (
+    load_crud_access,
+    ensure_system_roles,
+    reconcile_catalog,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +63,7 @@ def _get_roles(request: Request) -> list[str]:
         return roles
     token = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
     if token:
-        return list(dict.fromkeys([token, 'anonymous']))  # authenticated roles inherit anonymous
+        return list(dict.fromkeys([token, 'anonymous']))
     return ['anonymous']
 
 
@@ -69,10 +75,10 @@ def _get_role_filter(crud_access: dict, verb: str, authorized_roles: list[str]) 
             continue
         rv = role_map[role]
         if rv is None:
-            return {}  # unrestricted access for this role — no filter
+            return {}
         if isinstance(rv, dict):
             if 'filter' not in rv:
-                return {}  # dict without filter means unrestricted
+                return {}
             combined.update(rv['filter'])
     return combined
 
@@ -92,7 +98,7 @@ def _effective_out_fields(
     matched = False
     for role in authorized_roles:
         if role not in role_map:
-            continue  # role not listed — skip, don't deny
+            continue
         matched = True
         rv = role_map[role]
         if isinstance(rv, dict):
@@ -103,10 +109,10 @@ def _effective_out_fields(
         else:
             out = rv
         if out is None:
-            return []  # None means all fields allowed for this role
+            return []
         fields.extend(out)
     if not matched:
-        return None  # no matching role → deny
+        return None
     return [f for f in dict.fromkeys(fields) if f not in api_excluded]
 
 
@@ -122,10 +128,10 @@ def _effective_in_fields(
     for role in authorized_roles:
         rv = role_map.get(role)
         if rv is None or not isinstance(rv, dict):
-            continue  # role not authorized for this verb — skip
+            continue
         in_val = rv.get('in')
         if in_val is None:
-            return []  # None means all fields allowed
+            return []
         fields.extend(in_val)
     return [f for f in dict.fromkeys(fields) if f not in api_excluded]
 
@@ -255,11 +261,17 @@ def _parse_q(
 
 # ---------------------------------------------------------------------------
 # Route handler factories
-# Decorator applied AFTER __name__/__qualname__ are set so Litestar picks up
-# the unique name when building operation_ids for OpenAPI.
+#
+# Each factory closes over:
+#   - resource: str  (used as key into crud_access_by_res / api_excluded_by_res)
+#   - crud_access_by_res: dict[str, dict]  — populated at startup from DB
+#   - api_excluded_by_res: dict[str, list] — populated at build time from Python modules
 # ---------------------------------------------------------------------------
 
-def _make_list_handler(path: str, cls, crud_access: dict, api_excluded: list, resource: str):
+def _make_list_handler(
+    path: str, cls, resource: str,
+    crud_access_by_res: dict, api_excluded_by_res: dict,
+):
     slug = resource.replace('/', '_')
 
     async def handler(
@@ -269,6 +281,8 @@ def _make_list_handler(path: str, cls, crud_access: dict, api_excluded: list, re
         offset: Optional[int] = 0,
         q: Optional[str] = None,
     ) -> dict:
+        crud_access = crud_access_by_res.get(resource, {})
+        api_excluded = api_excluded_by_res.get(resource, [])
         roles = _get_roles(request)
         filter_kwargs: dict = {}
         search_cols: list[str] = []
@@ -306,8 +320,9 @@ def _make_list_handler(path: str, cls, crud_access: dict, api_excluded: list, re
 
 
 def _make_get_handler(
-    path: str, cls, crud_access: dict, api_excluded: list,
-    pk_info: list[tuple[str, str]], resource: str,
+    path: str, cls, resource: str,
+    crud_access_by_res: dict, api_excluded_by_res: dict,
+    pk_info: list[tuple[str, str]],
 ):
     pk_names = [p[0] for p in pk_info]
     is_simple = len(pk_names) == 1
@@ -315,6 +330,8 @@ def _make_get_handler(
     slug = resource.replace('/', '_')
 
     async def handler(request: Request, id: str) -> dict:
+        crud_access = crud_access_by_res.get(resource, {})
+        api_excluded = api_excluded_by_res.get(resource, [])
         roles = _get_roles(request)
         role_filter = _get_role_filter(crud_access, 'GET', roles)
         authorized = _effective_out_fields(crud_access, 'GET', roles, api_excluded)
@@ -331,13 +348,18 @@ def _make_get_handler(
 
 
 def _make_post_handler(
-    path: str, cls, crud_access: dict, api_excluded: list,
-    resource: str, pk_name: str,
+    path: str, cls, resource: str,
+    crud_access_by_res: dict, api_excluded_by_res: dict,
+    pk_name: str,
 ):
     slug = resource.replace('/', '_')
 
     async def handler(request: Request, data: dict[str, Any]) -> dict:
+        crud_access = crud_access_by_res.get(resource, {})
+        api_excluded = api_excluded_by_res.get(resource, [])
         roles = _get_roles(request)
+        if not crud_access.get('POST') and 'ho_dev' not in roles:
+            raise HTTPException(status_code=403)
         in_fields = _effective_in_fields(crud_access, 'POST', roles, api_excluded)
         payload = {
             k: v for k, v in data.items()
@@ -353,8 +375,9 @@ def _make_post_handler(
 
 
 def _make_put_handler(
-    path: str, cls, crud_access: dict, api_excluded: list,
-    pk_info: list[tuple[str, str]], resource: str,
+    path: str, cls, resource: str,
+    crud_access_by_res: dict, api_excluded_by_res: dict,
+    pk_info: list[tuple[str, str]],
 ):
     pk_names = [p[0] for p in pk_info]
     is_simple = len(pk_names) == 1
@@ -362,7 +385,11 @@ def _make_put_handler(
     slug = resource.replace('/', '_')
 
     async def handler(request: Request, id: str, data: dict[str, Any]) -> dict:
+        crud_access = crud_access_by_res.get(resource, {})
+        api_excluded = api_excluded_by_res.get(resource, [])
         roles = _get_roles(request)
+        if not crud_access.get('PUT') and 'ho_dev' not in roles:
+            raise HTTPException(status_code=403)
         in_fields = _effective_in_fields(crud_access, 'PUT', roles, api_excluded)
         authorized = _effective_out_fields(crud_access, 'PUT', roles, api_excluded)
         payload = {
@@ -381,8 +408,10 @@ def _make_put_handler(
 
 
 def _make_delete_handler(
-    path: str, cls, crud_access: dict, api_excluded: list,
-    pk_info: list[tuple[str, str]], resource: str, ws_rmap: dict,
+    path: str, cls, resource: str,
+    crud_access_by_res: dict, api_excluded_by_res: dict,
+    pk_info: list[tuple[str, str]],
+    ws_rmap: dict,
 ):
     pk_names = [p[0] for p in pk_info]
     is_simple = len(pk_names) == 1
@@ -390,6 +419,10 @@ def _make_delete_handler(
     slug = resource.replace('/', '_')
 
     async def handler(request: Request, id: str) -> None:
+        crud_access = crud_access_by_res.get(resource, {})
+        roles = _get_roles(request)
+        if not crud_access.get('DELETE') and 'ho_dev' not in roles:
+            raise HTTPException(status_code=403)
         pk_filter = {pk_name: id} if is_simple else _parse_composite_pk(id, pk_names)
         inst = cls(**pk_filter)
         await _ws_broadcast_cascade(inst, resource, id, ws_rmap)
@@ -504,18 +537,20 @@ def _make_ho_meta(model, prefix: str):
     return ho_meta
 
 
-def _make_ho_roles(roles_list: list, prefix: str):
+def _make_ho_roles(roles_holder: list, prefix: str):
+    """roles_holder[0] is the roles list, populated at startup."""
     @get(f'{prefix}/ho_roles')
     async def ho_roles() -> list:
-        return roles_list
+        return roles_holder[0]
     return ho_roles
 
 
-def _make_ho_access(access_map: dict, model, prefix: str):
+def _make_ho_access(access_map_holder: list, model, prefix: str):
+    """access_map_holder[0] is the access map, populated at startup."""
     @get(f'{prefix}/ho_access')
     async def ho_access(request: Request) -> dict:
         roles = _get_roles(request)
-        return _filter_access_for_roles(access_map, roles)
+        return _filter_access_for_roles(access_map_holder[0], roles)
     return ho_access
 
 
@@ -567,13 +602,17 @@ def build_crud_app(
     """
     Build a Litestar application dynamically from a halfORM model.
 
-    Reads CRUD_ACCESS from relation modules at startup and registers
-    routes programmatically — no code generation needed.
+    Registers routes for all relations at build time. Access configuration
+    (roles, field restrictions) is loaded from "half_orm_meta.api" at startup.
     """
     prefix = f'/v{api_version}' if api_version is not None else ''
 
-    access_map: dict = {}
-    roles_set: set[str] = {'ho_dev'}
+    # Mutable containers populated at startup — handlers close over these refs
+    crud_access_by_res: dict[str, dict]  = {}
+    api_excluded_by_res: dict[str, list] = {}
+    access_map_holder: list = [{}]   # access_map_holder[0] = actual map
+    roles_holder: list     = [[]]    # roles_holder[0]      = sorted roles list
+
     ws_rmap: dict = {}
     relation_handlers: list = []
 
@@ -582,92 +621,43 @@ def build_crud_app(
             mod = importlib.import_module(cls.__module__)
         except ModuleNotFoundError:
             mod = None
-        crud_access = getattr(mod, 'CRUD_ACCESS', None) if mod else None
-        no_crud = crud_access is None
-        if not crud_access:
-            crud_access = {'GET': {}, 'POST': {}, 'PUT': {}, 'DELETE': {}}
 
+        # API_EXCLUDED_FIELDS stays in Python modules
         api_excluded: list[str] = getattr(mod, 'API_EXCLUDED_FIELDS', []) if mod else []
 
-        inst = cls()
-        schema = inst._t_fqrn[1]
-        table  = inst._t_fqrn[2]
+        inst    = cls()
+        schema  = inst._t_fqrn[1]
+        table   = inst._t_fqrn[2]
         resource = f'{schema}/{table}'
         path     = f'{prefix}/{resource}'
         pk_info  = _pk_info(cls)
 
-        # Field names for access-map building
-        sfqrn = inst._t_fqrn
-        all_field_names = list(model._fields_metadata(sfqrn).keys())
+        api_excluded_by_res[resource] = api_excluded
 
-        # Populate roles set
-        for verb_roles in crud_access.values():
-            if isinstance(verb_roles, dict):
-                roles_set.update(verb_roles.keys())
-
-        # Build access map entry
-        access_entry = _build_access_entry(crud_access, api_excluded, all_field_names)
-
-        # Add ho_dev entries when not in production
-        if not model._production_mode and access_entry:
-            all_f = [f for f in all_field_names if f not in api_excluded]
-            for verb in ('GET', 'POST', 'PUT', 'DELETE'):
-                if crud_access.get(verb):
-                    verb_entry = dict(access_entry.get(verb, {}))
-                    if verb == 'GET':
-                        verb_entry['ho_dev'] = {'out': all_f}
-                    elif verb == 'DELETE':
-                        verb_entry['ho_dev'] = 'allowed'
-                    else:
-                        verb_entry['ho_dev'] = {'in': all_f, 'out': all_f}
-                    access_entry[verb] = verb_entry
-
-        if access_entry:
-            access_map[resource] = access_entry
-
-        # Register WS cascade entry (simple PK only)
         if pk_info and len(pk_info) == 1:
             ws_rmap[resource] = (cls, pk_info[0][0])
 
-        # Build route handlers based on declared verbs.
-        # When no CRUD_ACCESS is defined, still register routes in dev mode so
-        # ho_dev (super-role) can inspect any relation without configuration.
-        dev_fallback = no_crud and not model._production_mode
-        has_get    = bool(crud_access.get('GET'))    or dev_fallback
-        has_post   = bool(crud_access.get('POST'))   or dev_fallback
-        has_put    = bool(crud_access.get('PUT'))    or dev_fallback
-        has_delete = bool(crud_access.get('DELETE')) or dev_fallback
-
-        if has_get:
+        relation_handlers.append(
+            _make_list_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res)
+        )
+        if pk_info:
             relation_handlers.append(
-                _make_list_handler(path, cls, crud_access, api_excluded, resource)
+                _make_get_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, pk_info)
             )
-            if pk_info:
-                relation_handlers.append(
-                    _make_get_handler(path, cls, crud_access, api_excluded, pk_info, resource)
-                )
-
-        if has_post and pk_info:
             relation_handlers.append(
-                _make_post_handler(path, cls, crud_access, api_excluded, resource, pk_info[0][0])
+                _make_post_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, pk_info[0][0])
             )
-
-        if has_put and pk_info:
             relation_handlers.append(
-                _make_put_handler(path, cls, crud_access, api_excluded, pk_info, resource)
+                _make_put_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, pk_info)
             )
-
-        if has_delete and pk_info:
             relation_handlers.append(
-                _make_delete_handler(path, cls, crud_access, api_excluded, pk_info, resource, ws_rmap)
+                _make_delete_handler(path, cls, resource, crud_access_by_res, api_excluded_by_res, pk_info, ws_rmap)
             )
-
-    roles_list = sorted(roles_set - {'ho_dev', 'anonymous'})
 
     special_handlers = [
         _make_ho_meta(model, prefix),
-        _make_ho_roles(roles_list, prefix),
-        _make_ho_access(access_map, model, prefix),
+        _make_ho_roles(roles_holder, prefix),
+        _make_ho_access(access_map_holder, model, prefix),
         _make_ws_handler(prefix),
     ]
 
@@ -687,6 +677,50 @@ def build_crud_app(
         if not _HO_WARN_SHOWN:
             print(_HO_WARN, file=sys.stderr, flush=True)
             _HO_WARN_SHOWN = True
+
+        await ensure_system_roles(model)
+        await reconcile_catalog(model)
+
+        roles_set: set[str] = {'ho_dev'}
+        access_map: dict = {}
+
+        for cls, _kind in model.classes():
+            inst     = cls()
+            schema   = inst._t_fqrn[1]
+            table    = inst._t_fqrn[2]
+            resource = f'{schema}/{table}'
+            api_excluded = api_excluded_by_res.get(resource, [])
+
+            crud_access = await load_crud_access(model, schema, table) or {}
+            crud_access_by_res[resource] = crud_access
+
+            sfqrn = inst._t_fqrn
+            all_field_names = list(model._fields_metadata(sfqrn).keys())
+
+            for verb_roles in crud_access.values():
+                if isinstance(verb_roles, dict):
+                    roles_set.update(verb_roles.keys())
+
+            access_entry = _build_access_entry(crud_access, api_excluded, all_field_names)
+
+            if not model._production_mode and access_entry:
+                all_f = [f for f in all_field_names if f not in api_excluded]
+                for verb in ('GET', 'POST', 'PUT', 'DELETE'):
+                    if crud_access.get(verb):
+                        verb_entry = dict(access_entry.get(verb, {}))
+                        if verb == 'GET':
+                            verb_entry['ho_dev'] = {'out': all_f}
+                        elif verb == 'DELETE':
+                            verb_entry['ho_dev'] = 'allowed'
+                        else:
+                            verb_entry['ho_dev'] = {'in': all_f, 'out': all_f}
+                        access_entry[verb] = verb_entry
+
+            if access_entry:
+                access_map[resource] = access_entry
+
+        access_map_holder[0] = access_map
+        roles_holder[0] = sorted(roles_set - {'ho_dev', 'anonymous'})
 
     return Litestar(
         route_handlers=special_handlers + relation_handlers + (route_handlers or []),
