@@ -1,4 +1,5 @@
 from ._helpers import _selector, _title, _field_type_category
+from ._permissions_matrix import _build_perm_data
 
 
 def _list_component(
@@ -9,6 +10,8 @@ def _list_component(
     fk_deps: list,
     all_fields: dict,
     pk_info: list | None = None,
+    crud_access: dict | None = None,
+    api_excluded: list | None = None,
 ) -> tuple[str, str, str]:
     title  = _title(schema_name, table_name)
     fk_map = {lf: (rs, rt) for lf, rs, rt, _ in fk_deps}
@@ -107,6 +110,12 @@ def _list_component(
     can_create = f"\n  readonly canCreate = computed(() => !!this.auth.access()['{map_key}']?.POST);" if has_post else ''
     can_delete = f"\n  readonly canDelete = computed(() => !!this.auth.access()['{map_key}']?.DELETE);" if has_del else ''
 
+    perm_roles_ts, perm_matrix_ts = _build_perm_data(
+        crud_access or {}, list(all_fields.keys()), api_excluded or [])
+    perm_data = f"""
+  readonly permRoles = {perm_roles_ts};
+  readonly permMatrix: PermMatrix = {perm_matrix_ts};"""
+
     all_columns_literal = ', '.join(f"'{f}'" for f in out_names)
     inaccessible_fields = f"""
   private readonly allColumns = [{all_columns_literal}];
@@ -187,7 +196,10 @@ def _list_component(
   }});"""
 
     router_link_es  = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
-    router_link_imp = 'RouterLink' if needs_router_link else ''
+    _comp_imports = ['PermissionsMatrixComponent']
+    if needs_router_link:
+        _comp_imports.insert(0, 'RouterLink')
+    imports_str = ', '.join(_comp_imports)
     if pk_extractor:
         # Add type annotation to lambda parameter
         typed_extractor = pk_extractor.replace('i =>', '(i: Row) =>')
@@ -206,6 +218,7 @@ def _list_component(
   <div class="flex justify-between items-center mb-4">
     <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
   </div>
+  <app-permissions-matrix [permissions]="permMatrix" [roles]="permRoles" />
 }}
 <div [class]="embedded ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
   <table class="w-full border-collapse">
@@ -255,11 +268,13 @@ import type {{ Row }} from '../../../generated/resource.silo';
 import {{ AuthService }} from '../../../core/auth.service';
 import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '../../../generated/stores/filters';
 import type {{ FieldType }} from '../../../generated/stores/filters';
+import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';
+import type {{ PermMatrix }} from '../../../generated/permissions-matrix.component';
 
 @Component({{
   selector: '{_selector(schema_name, table_name, 'list')}',
   standalone: true,
-  imports: [{router_link_imp}],
+  imports: [{imports_str}],
   templateUrl: './list.component.html',
   styleUrl: './list.component.css',
 }})
@@ -286,7 +301,7 @@ export class {iname}ListComponent {{
   @Input() embedded = false;
 
   localFilters = signal<Record<string, string>>({{}});
-{can_create}{can_delete}{inaccessible_fields}
+{can_create}{can_delete}{inaccessible_fields}{perm_data}
 {field_types_map}
 {displayItems_block}
 

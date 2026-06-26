@@ -10,6 +10,7 @@ Signal-based state (no NgRx), standalone components, Tailwind CSS.
 
 import importlib
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 
 from half_orm_gen.backend.crud_routes import (
@@ -35,6 +36,38 @@ from ._specs import _schema_component_spec_ts
 from ._list_component import _list_component
 from ._form_components import _create_component, _fields_component
 from ._detail_component import _detail_component
+from ._permissions_matrix import _permissions_matrix_component_ts, _permissions_fields_component_ts
+
+
+# ---------------------------------------------------------------------------
+# Per-resource metadata container
+# ---------------------------------------------------------------------------
+
+@dataclass
+class _Resource:
+    schema_name: str
+    table_name: str
+    map_key: str
+    iname: str
+    base_path: str
+    all_fields: dict
+    out_names: list
+    pk_cols: list
+    pk_info: list | None
+    pk_field: str | None
+    pk_ts_type: str | None
+    pk_extractor: str | None
+    has_post: bool
+    has_put: bool
+    has_del: bool
+    has_detail: bool
+    post_in_names: list
+    put_in_names: list
+    fk_deps: list
+    rev_fk_deps: list
+    optional_post_fields: frozenset
+    crud_access: dict
+    api_excluded: list
 
 
 # ---------------------------------------------------------------------------
@@ -161,13 +194,16 @@ class AngularAppGenerator(StoreGenerator):
 
             base_path = f'{version_prefix}/{schema_name}/{table_name}'
 
-            resources.append((
-                schema_name, table_name, map_key, iname, base_path,
-                all_fields, out_names, pk_info, pk_field, pk_ts_type, pk_extractor,
-                has_post, has_put, has_del, has_detail,
-                post_in_names, put_in_names,
-                fk_deps, rev_fk_deps,
-                optional_post_fields,
+            resources.append(_Resource(
+                schema_name=schema_name, table_name=table_name, map_key=map_key,
+                iname=iname, base_path=base_path, all_fields=all_fields,
+                out_names=out_names, pk_cols=pk_cols, pk_info=pk_info, pk_field=pk_field,
+                pk_ts_type=pk_ts_type, pk_extractor=pk_extractor,
+                has_post=has_post, has_put=has_put, has_del=has_del, has_detail=has_detail,
+                post_in_names=post_in_names, put_in_names=put_in_names,
+                fk_deps=fk_deps, rev_fk_deps=rev_fk_deps,
+                optional_post_fields=optional_post_fields,
+                crud_access=crud_access, api_excluded=api_excluded,
             ))
 
         # --- auth guard ---
@@ -193,6 +229,10 @@ class AngularAppGenerator(StoreGenerator):
             if src.exists():
                 shutil.copy2(src, generated_dir / fname)
                 print(f'  {generated_dir / fname}')
+        self._write(generated_dir / 'permissions-fields.component.ts',
+                    _permissions_fields_component_ts())
+        self._write(generated_dir / 'permissions-matrix.component.ts',
+                    _permissions_matrix_component_ts())
 
         # --- static assets (served from public/ per angular.json) ---
         assets_src = Path(__file__).parents[3] / 'assets'
@@ -203,14 +243,18 @@ class AngularAppGenerator(StoreGenerator):
 
         # --- app routes + app component ---
         route_meta = [
-            (r[0], r[1], r[2], r[11], r[12], r[14])  # sn, tn, mk, has_post, has_put, has_detail
+            (r.schema_name, r.table_name, r.map_key, r.has_post, r.has_put, r.has_detail)
             for r in resources
         ]
-        first_route = f'/ho_bo/{resources[0][0]}/{resources[0][1]}' if resources else '/ho_bo'
+        first_route = (
+            f'/ho_bo/{resources[0].schema_name}/{resources[0].table_name}'
+            if resources else '/ho_bo'
+        )
         self._write(app_dir / 'app.routes.ts',
                     _app_routes(route_meta, first_route))
         self._write(app_dir / 'app.component.ts',
-                    _app_component([(r[0], r[1]) for r in resources], version_prefix=version_prefix))
+                    _app_component([(r.schema_name, r.table_name) for r in resources],
+                                   version_prefix=version_prefix))
 
         # --- home + login + access pages ---
         self._write(app_dir / 'pages' / 'home'   / 'home.component.ts',
@@ -225,40 +269,44 @@ class AngularAppGenerator(StoreGenerator):
                     _access_component(version_prefix))
 
         # --- per-resource generated components ---
-        for (schema_name, table_name, map_key, iname, base_path,
-             all_fields, out_names, pk_info, pk_field, pk_ts_type, pk_extractor,
-             has_post, has_put, has_del, has_detail,
-             post_in_names, put_in_names,
-             fk_deps, rev_fk_deps,
-             optional_post_fields) in resources:
+        for r in resources:
+            comp_dir = app_dir / 'generated' / 'components' / f'{r.schema_name}_{r.table_name}'
 
-            comp_dir = app_dir / 'generated' / 'components' / f'{schema_name}_{table_name}'
-
-            ts, html, css = _list_component(schema_name, table_name, iname, map_key,
-                                             out_names, pk_field, pk_ts_type, pk_extractor,
-                                             has_post, has_del, fk_deps, all_fields, pk_info)
+            ts, html, css = _list_component(
+                r.schema_name, r.table_name, r.iname, r.map_key,
+                r.out_names, r.pk_field, r.pk_ts_type, r.pk_extractor,
+                r.has_post, r.has_del, r.fk_deps, r.all_fields, r.pk_info,
+                crud_access=r.crud_access, api_excluded=r.api_excluded,
+            )
             self._write(comp_dir / 'list.component.ts', ts)
             self._write(comp_dir / 'list.component.html', html)
             self._write(comp_dir / 'list.component.css', css)
 
-            if has_post:
-                ts, html, css = _create_component(schema_name, table_name, iname,
-                                                   post_in_names, all_fields, optional_post_fields)
+            if r.has_post:
+                ts, html, css = _create_component(
+                    r.schema_name, r.table_name, r.iname,
+                    r.post_in_names, r.all_fields, r.optional_post_fields,
+                )
                 self._write(comp_dir / 'create.component.ts', ts)
                 self._write(comp_dir / 'create.component.html', html)
                 self._write(comp_dir / 'create.component.css', css)
 
-            if has_detail:
-                ts, html, css = _fields_component(schema_name, table_name, iname,
-                                                   pk_field, pk_cols, out_names, fk_deps, all_fields)
+            if r.has_detail:
+                ts, html, css = _fields_component(
+                    r.schema_name, r.table_name, r.iname,
+                    r.pk_field, r.pk_cols, r.out_names, r.fk_deps, r.all_fields,
+                )
                 self._write(comp_dir / 'fields.component.ts', ts)
                 self._write(comp_dir / 'fields.component.html', html)
                 self._write(comp_dir / 'fields.component.css', css)
 
-                ts, html, css = _detail_component(schema_name, table_name, iname,
-                                                   pk_field, pk_ts_type, pk_extractor,
-                                                   out_names, put_in_names, has_put,
-                                                   map_key, fk_deps, rev_fk_deps, all_fields)
+                ts, html, css = _detail_component(
+                    r.schema_name, r.table_name, r.iname,
+                    r.pk_field, r.pk_ts_type, r.pk_extractor,
+                    r.out_names, r.put_in_names, r.has_put,
+                    r.map_key, r.fk_deps, r.rev_fk_deps, r.all_fields,
+                    crud_access=r.crud_access, api_excluded=r.api_excluded,
+                )
                 self._write(comp_dir / 'detail.component.ts', ts)
                 self._write(comp_dir / 'detail.component.html', html)
                 self._write(comp_dir / 'detail.component.css', css)
