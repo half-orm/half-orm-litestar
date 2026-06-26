@@ -685,9 +685,11 @@ def _list_component(
         indicator = f"{{#if silo.sortField === '{f}'}}{{silo.sortAsc ? '↑' : '↓'}}{{/if}}"
         return (
             f'<th onclick={{{toggle}}}'
-            f' class="px-4 py-2 text-left text-sm font-semibold text-gray-600'
-            f' cursor-pointer select-none hover:bg-gray-200">'
-            f'{f} {indicator}</th>'
+            f' class="px-4 py-2 text-left text-sm font-semibold cursor-pointer select-none hover:bg-gray-200"'
+            f' class:text-gray-600={{!inaccessibleFields.has(\'{f}\')}}'
+            f' class:text-gray-300={{inaccessibleFields.has(\'{f}\')}}'
+            f' class:line-through={{inaccessibleFields.has(\'{f}\')}}'
+            f'>{f} {indicator}</th>'
         )
 
     action_th = '<th class="px-2 py-2 w-16"></th>' if has_del and pk_field else ''
@@ -718,14 +720,19 @@ def _list_component(
     )
 
     def _td(f: str) -> str:
+        inacc = f"inaccessibleFields.has('{f}')"
         if f in fk_map:
             rs, rt = fk_map[f]
             return (
                 f'<td class="px-4 py-2 text-sm">'
+                f'{{#if {inacc}}}'
+                f'<span class="line-through text-gray-300 text-xs select-none">—</span>'
+                f'{{:else}}'
                 f'<a href="/ho_bo/{rs}/{rt}/{{item.{f}}}"'
                 f' onclick={{(e) => {{ e.preventDefault(); e.stopPropagation(); goto(`/ho_bo/{rs}/{rt}/${{item.{f}}}`); }}}}'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block" class:max-w-xs={{!embedded}}'
                 f' title="{{cellTitle(item.{f})}}">{{fmtCell(item.{f})}}</a>'
+                f'{{/if}}'
                 f'</td>'
             )
         cell_click = (
@@ -734,10 +741,15 @@ def _list_component(
         )
         return (
             f'<td class="px-4 py-2 text-sm" onclick={{{cell_click}}}>'
+            f'{{#if {inacc}}}'
+            f'<span class="line-through text-gray-300 text-xs select-none">—</span>'
+            f'{{:else}}'
             f'<div class="truncate" class:max-w-xs={{!embedded}} title="{{cellTitle(item.{f})}}"'
             f' class:text-blue-600={{typeof (item as any).{f} === \'object\' && (item as any).{f} != null}}'
             f' class:cursor-pointer={{typeof (item as any).{f} === \'object\' && (item as any).{f} != null}}>'
-            f'{{fmtCell(item.{f})}}</div></td>'
+            f'{{fmtCell(item.{f})}}</div>'
+            f'{{/if}}'
+            f'</td>'
         )
 
     td_cols = '\n          '.join(_td(f) for f in out_names)
@@ -776,6 +788,15 @@ def _list_component(
 
     can_create = f"\n  const canCreate = $derived(!embedded && !!auth.access['{map_key}']?.POST);" if has_post else ''
     can_delete = f"\n  const canDelete  = $derived(!!auth.access['{map_key}']?.DELETE);" if has_del else ''
+
+    all_columns_literal = ', '.join(f"'{f}'" for f in out_names)
+    inaccessible_fields = f"""
+  const allColumns = [{all_columns_literal}];
+  const inaccessibleFields = $derived.by(() => {{
+    const out: string[] | undefined = (auth.access['{map_key}'] as any)?.GET?.out;
+    if (!out || out.length === 0) return new Set<string>();
+    return new Set(allColumns.filter(f => !out.includes(f)));
+  }});"""
     delete_fn  = (
         f'\n  async function handleDelete(id: string) {{\n'
         f'    if (confirm(\'Delete this item?\')) {{\n'
@@ -1003,7 +1024,7 @@ def _list_component(
     }}
   }});
 """.rstrip()}
-{can_create}{can_delete}{delete_fn}
+{can_create}{can_delete}{inaccessible_fields}{delete_fn}
   let jsonDialog = $state<string | null>(null);
   function showJson(v: unknown): void {{ jsonDialog = JSON.stringify(v, null, 2); }}
 </script>

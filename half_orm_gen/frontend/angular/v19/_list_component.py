@@ -16,8 +16,10 @@ def _list_component(
     # Table headers (sortable)
     th_cols = '\n            '.join(
         f'<th (click)="sortBy(\'{f}\')"'
-        f' class="px-4 py-2 text-left text-sm font-semibold text-gray-600'
-        f' cursor-pointer select-none hover:bg-gray-200">'
+        f' class="px-4 py-2 text-left text-sm font-semibold cursor-pointer select-none hover:bg-gray-200"'
+        f' [class.text-gray-600]="!inaccessibleFields().has(\'{f}\')"'
+        f' [class.text-gray-300]="inaccessibleFields().has(\'{f}\')"'
+        f' [class.line-through]="inaccessibleFields().has(\'{f}\')">'
         f'{f} {{{{ silo.sortField() === \'{f}\' ? (silo.sortAsc() ? \'↑\' : \'↓\') : \'\' }}}}</th>'
         for f in out_names
     )
@@ -50,21 +52,27 @@ def _list_component(
     )
 
     def _td(f: str) -> str:
+        inaccessible_guard = f'@if (inaccessibleFields().has(\'{f}\')) {{\n                <span class="line-through text-gray-300 text-xs select-none">—</span>\n              }} @else {{'
+        inaccessible_end = '\n              }'
         if f in fk_map:
             rs, rt = fk_map[f]
             return (
                 f'<td class="px-4 py-2 text-sm">'
+                f'{inaccessible_guard}'
                 f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item[\'{f}\'])]" (click)="$event.stopPropagation()"'
                 f' class="text-blue-500 hover:underline font-mono text-xs truncate block" [class.max-w-xs]="!embedded"'
                 f' [title]="cellTitle(item[\'{f}\'])">{{{{ fmtCell(item[\'{f}\']) }}}}</a>'
+                f'{inaccessible_end}'
                 f'</td>'
             )
         return (
             f'<td class="px-4 py-2 text-sm" (click)="cellClick($event, $any(item)[\'{f}\'])">'
+            f'{inaccessible_guard}'
             f'<div class="truncate" [class.max-w-xs]="!embedded" [title]="cellTitle(item[\'{f}\'])"'
             f' [class.text-blue-600]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'"'
             f' [class.cursor-pointer]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'">'
             f'{{{{ fmtCell(item[\'{f}\']) }}}}</div>'
+            f'{inaccessible_end}'
             f'</td>'
         )
 
@@ -98,6 +106,15 @@ def _list_component(
 
     can_create = f"\n  readonly canCreate = computed(() => !!this.auth.access()['{map_key}']?.POST);" if has_post else ''
     can_delete = f"\n  readonly canDelete = computed(() => !!this.auth.access()['{map_key}']?.DELETE);" if has_del else ''
+
+    all_columns_literal = ', '.join(f"'{f}'" for f in out_names)
+    inaccessible_fields = f"""
+  private readonly allColumns = [{all_columns_literal}];
+  readonly inaccessibleFields = computed(() => {{
+    const out: string[] | undefined = this.auth.access()['{map_key}']?.GET?.out;
+    if (!out || out.length === 0) return new Set<string>();
+    return new Set(this.allColumns.filter(f => !out.includes(f)));
+  }});"""
 
     delete_fn = ''
     if has_del and pk_field:
@@ -269,7 +286,7 @@ export class {iname}ListComponent {{
   @Input() embedded = false;
 
   localFilters = signal<Record<string, string>>({{}});
-{can_create}{can_delete}
+{can_create}{can_delete}{inaccessible_fields}
 {field_types_map}
 {displayItems_block}
 
