@@ -15,6 +15,7 @@ from litestar.exceptions import HTTPException
 from half_orm_gen.backend.ho_api.loader import load_crud_access
 from half_orm_gen.backend.ho_api.models import HoApiModels
 from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY
+from half_orm_gen.backend.litestar.v2.runtime import _manager
 
 
 def _check_admin(request: Request) -> list[str]:
@@ -80,6 +81,7 @@ def make_ho_admin_handlers(
         await _reload_resource_access(
             model, resource, crud_access_by_res, api_excluded_by_res, access_map_holder
         )
+        await _manager.broadcast({'event': 'access_reload'})
 
     @get(f'{prefix}/ho_admin/roles')
     async def ho_admin_roles(request: Request) -> list:

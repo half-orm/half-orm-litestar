@@ -180,7 +180,7 @@ def _auth_store(version_prefix: str) -> str:
 import {{ goto }} from '$app/navigation';
 import {{ clearAllStates }} from '$lib/stateRegistry';
 
-export type WsEvent = {{ event: 'create' | 'update' | 'delete'; resource: string; id: unknown }};
+export type WsEvent = {{ event: 'create' | 'update' | 'delete' | 'access_reload'; resource: string; id: unknown }};
 
 class AuthState {{
     token         = $state<string | null>(
@@ -224,7 +224,11 @@ class AuthState {{
                      || `${{window.location.protocol === 'https:' ? 'wss' : 'ws'}}://${{window.location.host}}`;
         const ws = new WebSocket(`${{base}}{version_prefix}/ws`);
         ws.onmessage = (e) => {{
-            try {{ this.lastEvent = JSON.parse(e.data) as WsEvent; }} catch {{}}
+            try {{
+                const msg = JSON.parse(e.data) as WsEvent;
+                if (msg.event === 'access_reload') {{ void this._fetchAccess(); }}
+                else {{ this.lastEvent = msg; }}
+            }} catch {{}}
         }};
         ws.onclose = () => {{ setTimeout(() => this._connectWs(), 2000); }};
         ws.onerror = () => ws.close();

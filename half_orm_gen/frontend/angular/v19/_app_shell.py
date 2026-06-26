@@ -9,7 +9,7 @@ import {{ Subject }} from 'rxjs';
 import {{ clearAllStates }} from './state-registry';
 
 export interface WsEvent {{
-  event: 'create' | 'update' | 'delete';
+  event: 'create' | 'update' | 'delete' | 'access_reload';
   resource: string;
   id: unknown;
 }}
@@ -79,7 +79,11 @@ export class AuthService {{
     const host  = typeof window !== 'undefined' ? window.location.host : 'localhost:8000';
     const ws = new WebSocket(`${{proto}}://${{host}}{version_prefix}/ws`);
     ws.onmessage = (e) => {{
-      try {{ this.wsEvent$.next(JSON.parse(e.data) as WsEvent); }} catch {{}}
+      try {{
+        const msg = JSON.parse(e.data) as WsEvent;
+        if (msg.event === 'access_reload') {{ void this._fetchAccess(); }}
+        else {{ this.wsEvent$.next(msg); }}
+      }} catch {{}}
     }};
     ws.onclose = () => {{ setTimeout(() => this.connectWs(), 2000); }};
     ws.onerror  = () => ws.close();
