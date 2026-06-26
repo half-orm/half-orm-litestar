@@ -126,7 +126,7 @@ const VERB_COLOR: Record<string, string> = {{
                       @if (panel()!.verb === 'POST' || panel()!.verb === 'PUT') {{
                         <div class="min-w-[140px]">
                           <div class="flex items-center gap-3 mb-2">
-                            <div class="text-[10px] font-bold uppercase tracking-widest text-blue-500">In fields</div>
+                            <div class="text-[10px] font-bold uppercase tracking-widest text-blue-500">In <span class="normal-case font-normal opacity-70">client → api</span></div>
                             <label class="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer">
                               <input type="checkbox" [checked]="panelAccess()!.all_fields_in"
                                      (change)="updateAllFields('in', !panelAccess()!.all_fields_in)"
@@ -152,7 +152,7 @@ const VERB_COLOR: Record<string, string> = {{
                       <!-- Out fields -->
                       <div class="min-w-[140px]">
                         <div class="flex items-center gap-3 mb-2">
-                          <div class="text-[10px] font-bold uppercase tracking-widest text-emerald-500">Out fields</div>
+                          <div class="text-[10px] font-bold uppercase tracking-widest text-emerald-500">Out <span class="normal-case font-normal opacity-70">api → client</span></div>
                           <label class="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer">
                             <input type="checkbox" [checked]="panelAccess()!.all_fields_out"
                                    (change)="updateAllFields('out', !panelAccess()!.all_fields_out)"
