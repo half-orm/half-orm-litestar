@@ -1,6 +1,7 @@
 import { auth } from '$lib/auth.svelte.ts';
 import { registerClear } from '$lib/stateRegistry';
 import type { ResourceSchema } from './schema.types';
+import type { PermMatrix } from './schema.types';
 
 export type Row = Record<string, unknown>;
 
@@ -16,6 +17,21 @@ export class ResourceSilo {
   sortField  = $state<string | null>(null);
   sortAsc    = $state(true);
 
+  // Static permissions from CRUD_ACCESS (all roles)
+  readonly permRoles: string[];
+  readonly permMatrix: PermMatrix;
+
+  // Per-resource access signals — derived from auth at runtime
+  canCreate          = $derived(!!(auth.access as any)[this.key]?.POST);
+  canDelete          = $derived(!!(auth.access as any)[this.key]?.DELETE);
+  canEdit            = $derived(!!(auth.access as any)[this.key]?.PUT);
+  inaccessibleFields = $derived.by(() => {
+    const out = (auth.access as any)[this.key]?.GET?.out;
+    if (!out || !Array.isArray(out) || out.length === 0) return new Set<string>();
+    const allFields = this.schema.fields.map((f: any) => f.name as string);
+    return new Set(allFields.filter(f => !(out as string[]).includes(f)));
+  });
+
   private loadedFilters = new Map<string, boolean>();
   private pkExtractor: ((item: Row) => string) | null;
   private pkFields: string[];
@@ -24,7 +40,12 @@ export class ResourceSilo {
     readonly key: string,
     readonly schema: ResourceSchema,
     private baseUrl: string,
+    permRoles: string[] = [],
+    permMatrix: PermMatrix = {},
   ) {
+    this.permRoles  = permRoles;
+    this.permMatrix = permMatrix;
+
     this.pkFields = schema.pk_fields;
     if (schema.pk_fields.length === 1) {
       const pk = schema.pk_fields[0];

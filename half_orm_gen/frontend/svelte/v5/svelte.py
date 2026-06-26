@@ -20,6 +20,7 @@ from half_orm_gen.backend.crud_routes import (
     _py_type_str,
 )
 from half_orm_gen.frontend.base import StoreGenerator
+from half_orm_gen.frontend.angular.v19._permissions_matrix import _build_perm_data
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +380,7 @@ def _schema_page_svelte() -> str:
 <script lang="ts">
   import { registry } from '$lib/generated/stores/silo-registry.svelte.ts';
   import type { FieldSchema, FkDep } from '$lib/generated/stores/schema.types';
+  import PermissionsMatrix from '$lib/generated/PermissionsMatrix.svelte';
 
   interface ResourceView {
     key: string;
@@ -509,6 +511,14 @@ def _schema_page_svelte() -> str:
                 {/if}
               </tbody>
             </table>
+            {#if registry.tryGet(res.key)}
+              <div class="px-4 py-2 border-t bg-gray-50">
+                <PermissionsMatrix
+                  permissions={registry.tryGet(res.key)!.permMatrix}
+                  roles={registry.tryGet(res.key)!.permRoles}
+                  defaultOpen={true} />
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
@@ -686,9 +696,9 @@ def _list_component(
         return (
             f'<th onclick={{{toggle}}}'
             f' class="px-4 py-2 text-left text-sm font-semibold cursor-pointer select-none hover:bg-gray-200"'
-            f' class:text-gray-600={{!inaccessibleFields.has(\'{f}\')}}'
-            f' class:text-gray-300={{inaccessibleFields.has(\'{f}\')}}'
-            f' class:line-through={{inaccessibleFields.has(\'{f}\')}}'
+            f' class:text-gray-600={{!silo.inaccessibleFields.has(\'{f}\')}}'
+            f' class:text-gray-300={{silo.inaccessibleFields.has(\'{f}\')}}'
+            f' class:line-through={{silo.inaccessibleFields.has(\'{f}\')}}'
             f'>{f} {indicator}</th>'
         )
 
@@ -720,7 +730,7 @@ def _list_component(
     )
 
     def _td(f: str) -> str:
-        inacc = f"inaccessibleFields.has('{f}')"
+        inacc = f"silo.inaccessibleFields.has('{f}')"
         if f in fk_map:
             rs, rt = fk_map[f]
             return (
@@ -770,7 +780,7 @@ def _list_component(
     if has_del and pk_field:
         action_td = (
             f'<td class="px-2 py-2">\n'
-            f'          {{#if canDelete}}\n'
+            f'          {{#if silo.canDelete}}\n'
             f'            <button'
             f' onclick={{(e) => {{ e.stopPropagation(); handleDelete({pk_item_expr}); }}}}'
             f'\n                    class="text-red-600 hover:underline text-sm">Delete</button>\n'
@@ -779,24 +789,13 @@ def _list_component(
         )
 
     new_btn = (
-        f'\n  {{#if canCreate}}\n'
+        f'\n  {{#if silo.canCreate}}\n'
         f'    <a href="/ho_bo/{schema_name}/{table_name}/new"\n'
         f'       class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">\n'
         f'      New\n    </a>\n  {{/if}}'
         if has_post else ''
     )
 
-    can_create = f"\n  const canCreate = $derived(!embedded && !!auth.access['{map_key}']?.POST);" if has_post else ''
-    can_delete = f"\n  const canDelete  = $derived(!!auth.access['{map_key}']?.DELETE);" if has_del else ''
-
-    all_columns_literal = ', '.join(f"'{f}'" for f in out_names)
-    inaccessible_fields = f"""
-  const allColumns = [{all_columns_literal}];
-  const inaccessibleFields = $derived.by(() => {{
-    const out: string[] | undefined = (auth.access['{map_key}'] as any)?.GET?.out;
-    if (!out || out.length === 0) return new Set<string>();
-    return new Set(allColumns.filter(f => !out.includes(f)));
-  }});"""
     delete_fn  = (
         f'\n  async function handleDelete(id: string) {{\n'
         f'    if (confirm(\'Delete this item?\')) {{\n'
@@ -848,6 +847,7 @@ def _list_component(
   import type {{ Row }} from '$lib/generated/stores/resource.silo.svelte.ts';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ goto }} from '$app/navigation';
+  import PermissionsMatrix from '$lib/generated/PermissionsMatrix.svelte';
 
   let {{ filters = {{}}, embedded = false }}: {{ filters?: Record<string, any>; embedded?: boolean }} = $props();
 
@@ -1024,7 +1024,7 @@ def _list_component(
     }}
   }});
 """.rstrip()}
-{can_create}{can_delete}{inaccessible_fields}{delete_fn}
+{delete_fn}
   let jsonDialog = $state<string | null>(null);
   function showJson(v: unknown): void {{ jsonDialog = JSON.stringify(v, null, 2); }}
 </script>
@@ -1033,6 +1033,7 @@ def _list_component(
 <div class="flex justify-between items-center mb-4">
   <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
 </div>
+<PermissionsMatrix permissions={{silo.permMatrix}} roles={{silo.permRoles}} />
 {{/if}}
 
 <div class="{{embedded ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'}}">
@@ -1434,9 +1435,8 @@ def _detail_page(
   {{/if}}"""
 
     map_key       = f'{schema_name}/{table_name}'
-    can_edit      = f"\n  const canEdit = $derived(!!auth.access['{map_key}']?.PUT);" if has_put else ''
     edit_btn_wrap = (
-        f'\n      {{#if canEdit}}{edit_btn}\n      {{/if}}'
+        f'\n      {{#if silo.canEdit}}{edit_btn}\n      {{/if}}'
         if has_put and visible_put else ''
     )
 
@@ -1550,7 +1550,8 @@ def _detail_page(
   import {{ goto }} from '$app/navigation';
   import {{ auth }} from '$lib/auth.svelte.ts';
   import {{ untrack }} from 'svelte';
-  import Fields from '$lib/generated/components/{stem}/Fields.svelte';{fk_imports}{rev_imports}
+  import Fields from '$lib/generated/components/{stem}/Fields.svelte';
+  import PermissionsMatrix from '$lib/generated/PermissionsMatrix.svelte';{fk_imports}{rev_imports}
 
   const silo = registry.get('{map_key}');
   let {{ id }}: {{ id: string }} = $props();
@@ -1566,10 +1567,13 @@ def _detail_page(
     if (ev?.resource === '{map_key}' && String(ev.id) === id && ev.event === 'delete')
       goto('/ho_bo/{schema_name}/{table_name}');
   }});
-{fk_effects}{can_edit}{extra_script}
+{fk_effects}{extra_script}
 </script>
 
-<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6 px-4 lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
+<div class="px-4 mt-4">
+  <PermissionsMatrix permissions={{silo.permMatrix}} roles={{silo.permRoles}} />
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-2 px-4 lg:h-[calc(100vh-4rem)] lg:overflow-hidden">
   <div class="min-w-0 lg:overflow-y-auto lg:pr-1">
     {{#if item}}
     <div class="p-6 bg-white rounded-lg shadow">
@@ -1627,6 +1631,12 @@ class SvelteAppGenerator(StoreGenerator):
         for fname in ('schema.types.ts', 'resource.silo.svelte.ts', 'silo-registry.svelte.ts'):
             shutil.copy2(svelte_assets / fname, stores_dir / fname)
             print(f'  {stores_dir / fname}')
+
+        # --- shared Svelte components (permissions matrix) ---
+        generated_dir = output_dir / 'src' / 'lib' / 'generated'
+        for fname in ('PermissionsFields.svelte', 'PermissionsMatrix.svelte'):
+            shutil.copy2(svelte_assets / fname, generated_dir / fname)
+            print(f'  {generated_dir / fname}')
         # Copy shared filters module
         filters_src = Path(__file__).parents[2] / 'templates_filters.ts'
         if filters_src.exists():
@@ -1715,8 +1725,35 @@ class SvelteAppGenerator(StoreGenerator):
                 out_names, pk_info, pk_field, all_fields,
                 has_post, has_put, has_del,
                 post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps,
-                optional_post_fields,
+                optional_post_fields, api_excluded,
             ))
+
+        # --- permissions-data.ts (static perm data for all resources) ---
+        perm_entries = []
+        for (sn, tn, _stem, _rn, _in,
+             _on, _pki, _pkf, a_fields,
+             _hp, _hpu, _hd,
+             _pin, _pun, mk, ca, _fk, _rfk,
+             _opf, ae) in resources:
+            roles_ts, matrix_ts = _build_perm_data(ca, list(a_fields.keys()), ae)
+            perm_entries.append(
+                f"  '{mk}': {{\n"
+                f"    roles: {roles_ts},\n"
+                f"    matrix: {matrix_ts},\n"
+                f"  }}"
+            )
+        perm_body = ',\n'.join(perm_entries)
+        perm_data_ts = (
+            "import type { PermMatrix } from './schema.types';\n\n"
+            "export interface ResourcePermissions {\n"
+            "  roles: string[];\n"
+            "  matrix: PermMatrix;\n"
+            "}\n\n"
+            "export const PERMISSIONS: Record<string, ResourcePermissions> = {\n"
+            f"{perm_body}\n"
+            "};\n"
+        )
+        self._write(stores_dir / 'permissions-data.ts', perm_data_ts)
 
         # --- static assets ---
         assets_src = Path(__file__).parents[3] / 'assets'
@@ -1757,7 +1794,7 @@ class SvelteAppGenerator(StoreGenerator):
              out_names, pk_info, pk_field, all_fields,
              has_post, has_put, has_del,
              post_in_names, put_in_names, map_key, crud_access, fk_deps, rev_fk_deps,
-             optional_post_fields) in resources:
+             optional_post_fields, api_excluded) in resources:
 
             comp_dir = components_dir / stem
             res_dir  = routes_dir / '(nav)' / 'ho_bo' / schema_name / table_name
