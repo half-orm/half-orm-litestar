@@ -485,8 +485,8 @@ def build_crud_app(
                 access_map[resource] = access_entry
 
         access_map_holder[0] = access_map
-        roles_holder[0] = sorted(roles_set - {'anonymous'})
         parent_map_holder[0] = await load_role_parents(model)
+        roles_holder[0] = sorted(k for k in parent_map_holder[0] if k != 'anonymous')
 
     return Litestar(
         route_handlers=special_handlers + relation_handlers + (route_handlers or []),
