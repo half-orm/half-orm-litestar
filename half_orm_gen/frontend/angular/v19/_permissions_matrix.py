@@ -48,25 +48,25 @@ def _build_perm_data(
 
 def _permissions_fields_component_ts() -> str:
     return """\
-import { Component, Input } from '@angular/core';
+import { Component, input } from '@angular/core';
 import type { Verb, VerbAccess } from './schema.types';
 
 @Component({
   selector: 'app-permissions-fields',
   standalone: true,
   template: `
-    @if (access) {
+    @if (access()) {
       <div class="text-xs space-y-2">
-        @if (verb === 'POST' || verb === 'PUT') {
+        @if (verb() === 'POST' || verb() === 'PUT') {
           <div>
             <div class="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1">in</div>
-            @if (access.in == null) {
+            @if (access()!.in == null) {
               <em class="text-gray-400">all fields</em>
-            } @else if (access.in!.length === 0) {
+            } @else if (access()!.in!.length === 0) {
               <em class="text-gray-400">none</em>
             } @else {
               <div class="flex flex-wrap gap-1 max-w-[200px]">
-                @for (f of access.in!; track f) {
+                @for (f of access()!.in!; track f) {
                   <span class="bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-mono text-[10px]">{{ f }}</span>
                 }
               </div>
@@ -75,13 +75,13 @@ import type { Verb, VerbAccess } from './schema.types';
         }
         <div>
           <div class="text-[10px] font-bold uppercase tracking-widest text-emerald-500 mb-1">out</div>
-          @if (access.out == null) {
+          @if (access()!.out == null) {
             <em class="text-gray-400">all fields</em>
-          } @else if (access.out!.length === 0) {
+          } @else if (access()!.out!.length === 0) {
             <em class="text-gray-400">none</em>
           } @else {
             <div class="flex flex-wrap gap-1 max-w-[200px]">
-              @for (f of access.out!; track f) {
+              @for (f of access()!.out!; track f) {
                 <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-mono text-[10px]">{{ f }}</span>
               }
             </div>
@@ -92,15 +92,15 @@ import type { Verb, VerbAccess } from './schema.types';
   `,
 })
 export class PermissionsFieldsComponent {
-  @Input() access?: VerbAccess;
-  @Input() verb: Verb = 'GET';
+  readonly access = input<VerbAccess | undefined>(undefined);
+  readonly verb   = input<Verb>('GET');
 }
 """
 
 
 def _permissions_matrix_component_ts() -> str:
     return """\
-import { Component, ChangeDetectorRef, ElementRef, Input, OnInit, ViewChild, inject } from '@angular/core';
+import { Component, ChangeDetectorRef, ElementRef, input, OnInit, ViewChild, inject } from '@angular/core';
 import { PermissionsFieldsComponent } from './permissions-fields.component';
 import { AuthService } from '../core/auth.service';
 import type { Verb, VerbAccess, PermMatrix } from './schema.types';
@@ -128,13 +128,13 @@ import type { Verb, VerbAccess, PermMatrix } from './schema.types';
               </tr>
             </thead>
             <tbody>
-              @for (role of roles; track role) {
+              @for (role of roles(); track role) {
                 <tr class="border-t" [class.bg-gray-100]="auth.activeRoles().includes(role)">
                   <td class="px-4 py-2 font-mono border-r"
                       [class]="auth.activeRoles().includes(role) ? 'font-bold text-gray-900' : 'text-gray-700'">{{ role }}</td>
                   @for (verb of verbs; track verb) {
                     <td class="px-4 py-2 text-center">
-                      @if (permissions[role]?.[verb]) {
+                      @if (permissions()[role]?.[verb]) {
                         <span class="text-green-600 cursor-default select-none"
                               (mouseenter)="onEnter($event, role, verb)"
                               (mouseleave)="onLeave()">✓</span>
@@ -160,7 +160,7 @@ import type { Verb, VerbAccess, PermMatrix } from './schema.types';
             {{ hovered.role }} · {{ hovered.verb }}
           </div>
           <app-permissions-fields
-            [access]="permissions[hovered.role]![hovered.verb]"
+            [access]="permissions()[hovered.role]![hovered.verb]"
             [verb]="hovered.verb" />
         </div>
       }
@@ -168,14 +168,14 @@ import type { Verb, VerbAccess, PermMatrix } from './schema.types';
   `,
 })
 export class PermissionsMatrixComponent implements OnInit {
-  @Input() permissions: PermMatrix = {};
-  @Input() roles: string[] = [];
-  @Input() defaultOpen = false;
+  readonly permissions = input<PermMatrix>({});
+  readonly roles       = input<string[]>([]);
+  readonly defaultOpen = input(false);
   @ViewChild('tooltip') private tooltipEl!: ElementRef<HTMLElement>;
 
   open = false;
 
-  ngOnInit(): void { this.open = this.defaultOpen; }
+  ngOnInit(): void { this.open = this.defaultOpen(); }
   readonly verbs: Verb[] = ['GET', 'POST', 'PUT', 'DELETE'];
   hovered: { role: string; verb: Verb } | null = null;
 

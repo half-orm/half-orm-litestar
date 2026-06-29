@@ -43,7 +43,7 @@ def _list_component(
         '</th>'
     ) if has_del and pk_field else ''
     filter_row = (
-        f'\n          @if (!embedded) {{\n'
+        f'\n          @if (!embedded()) {{\n'
         f'          <tr class="bg-white border-b">\n'
         f'              {action_filter_th}\n'
         f'              {filter_inputs}\n'
@@ -60,7 +60,7 @@ def _list_component(
                 f'<td class="px-4 py-2 text-sm">'
                 f'{inaccessible_guard}'
                 f'<a [routerLink]="[\'/ho_bo/{rs}/{rt}\', String(item[\'{f}\'])]" (click)="$event.stopPropagation()"'
-                f' class="text-blue-500 hover:underline font-mono text-xs truncate block" [class.max-w-xs]="!embedded"'
+                f' class="text-blue-500 hover:underline font-mono text-xs truncate block" [class.max-w-xs]="!embedded()"'
                 f' [title]="cellTitle(item[\'{f}\'])">{{{{ fmtCell(item[\'{f}\']) }}}}</a>'
                 f'{inaccessible_end}'
                 f'</td>'
@@ -68,7 +68,7 @@ def _list_component(
         return (
             f'<td class="px-4 py-2 text-sm" (click)="cellClick($event, $any(item)[\'{f}\'])">'
             f'{inaccessible_guard}'
-            f'<div class="truncate" [class.max-w-xs]="!embedded" [title]="cellTitle(item[\'{f}\'])"'
+            f'<div class="truncate" [class.max-w-xs]="!embedded()" [title]="cellTitle(item[\'{f}\'])"'
             f' [class.text-blue-600]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'"'
             f' [class.cursor-pointer]="$any(item)[\'{f}\'] != null && typeof $any(item)[\'{f}\'] === \'object\'">'
             f'{{{{ fmtCell(item[\'{f}\']) }}}}</div>'
@@ -135,12 +135,12 @@ def _list_component(
     if _is_single_pk:
         _fk_items_src = (
             'Array.from(this.silo.byPk().values()).filter(item =>\n'
-            '          Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v)))'
+            '          Object.entries(this.filters()).every(([k, v]) => String((item as any)[k]) === String(v)))'
         )
     else:
         _fk_items_src = (
             'this.silo.items().filter(item =>\n'
-            '          Object.entries(this.filters).every(([k, v]) => String((item as any)[k]) === String(v)))'
+            '          Object.entries(this.filters()).every(([k, v]) => String((item as any)[k]) === String(v)))'
         )
 
     # Generate field type map for validation
@@ -155,7 +155,7 @@ def _list_component(
 
     displayItems_block = f"""\
   readonly displayItems = computed(() => {{
-    const hasFilters = Object.keys(this.filters).length > 0;
+    const hasFilters = Object.keys(this.filters()).length > 0;
     let items: Row[] = hasFilters
       ? {_fk_items_src}
       : this.silo.items();
@@ -194,15 +194,15 @@ def _list_component(
         highlight_attrs = ''
 
     html = f"""\
-@if (!embedded) {{
+@if (!embedded()) {{
   <div class="flex justify-between items-center mb-4">
     <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
   </div>
   <app-permissions-matrix [permissions]="silo.permMatrix" [roles]="silo.permRoles" />
 }}
-<div [class]="embedded ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
+<div [class]="embedded() ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
   <table class="w-full border-collapse">
-    <thead [class]="embedded ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'">
+    <thead [class]="embedded() ? 'bg-gray-100' : 'bg-gray-100 sticky top-0 z-10 shadow-sm'">
       <tr>
         {action_th}
         {th_cols}
@@ -238,7 +238,7 @@ def _list_component(
 """
 
     ts = f"""\
-import {{ Component, computed, effect, inject, Input, signal, untracked, DestroyRef, afterNextRender, ViewChildren, QueryList, ElementRef }} from '@angular/core';
+import {{ Component, computed, effect, inject, input, signal, untracked, DestroyRef, afterNextRender, ViewChildren, QueryList, ElementRef }} from '@angular/core';
 import {{ takeUntilDestroyed }} from '@angular/core/rxjs-interop';
 import {{ filter }} from 'rxjs';
 {router_link_es}import {{ Router, ActivatedRoute }} from '@angular/router';
@@ -276,8 +276,8 @@ export class {iname}ListComponent {{
   private filterDebounceTimer?: number;
   private hadFilters = false;
 
-  @Input() filters: Partial<Row> = {{}};
-  @Input() embedded = false;
+  readonly filters  = input<Partial<Row>>({{}});
+  readonly embedded = input(false);
 
   localFilters = signal<Record<string, string>>({{}});
 {field_types_map}
@@ -291,14 +291,14 @@ export class {iname}ListComponent {{
       const _token = this.auth.token();
       const _v    = this.auth.accessVersion();
       const _rv   = this.auth.resourceAccessVersion()['{map_key}'];
-      this.silo.list(this.filters);
+      this.silo.list(this.filters());
     }});{ws_effect}
 
     // Set up observer
     this.observer = new IntersectionObserver(
       (entries) => {{
         if (entries[0].isIntersecting && this.silo.hasMore() && !this.silo.isLoading()) {{
-          this.silo.loadMore(this.filters);
+          this.silo.loadMore(this.filters());
         }}
       }},
       {{ rootMargin: '0px 0px 400px 0px' }}
@@ -374,7 +374,7 @@ export class {iname}ListComponent {{
   }}
 
   private initFiltersFromUrl(): void {{
-    if (this.embedded) return; // Don't sync URL for embedded components
+    if (this.embedded()) return; // Don't sync URL for embedded components
 
     const params = this.route.snapshot.queryParams;
     const urlFilters = parseFiltersFromUrl(params, this.fieldTypes);
@@ -395,7 +395,7 @@ export class {iname}ListComponent {{
   }}
 
   private syncFiltersToUrl(filters: Record<string, string>): void {{
-    if (this.embedded) return; // Don't sync URL for embedded components
+    if (this.embedded()) return; // Don't sync URL for embedded components
 
     // Update store with current filters
     this.silo.filters.set(filters);

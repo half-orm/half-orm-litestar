@@ -139,7 +139,7 @@ export class ResourceSilo {
       catchError(() => of({ data: [], meta: { offset, limit: 100, has_more: false } }))
     ).subscribe(response => {
       if (offset === 0 && !searchQ && Object.keys(params).length === 0) this.setItems(response.data);
-      else this.mergeItems(response.data);
+      else this.mergeItems(response.data, otherParams);
       this.hasMore.set(response.meta.has_more);
       this.currentOffset.set(offset + response.data.length);
       this.isLoading.set(false);
@@ -208,14 +208,18 @@ export class ResourceSilo {
     }
   }
 
-  private mergeItems(newItems: Row[]): void {
+  private mergeItems(newItems: Row[], filterParams: Row = {}): void {
     if (!this.pkExtractor) {
       this.items.set([...this.items(), ...newItems]);
       return;
     }
     const ex = this.pkExtractor;
     const map = new Map(this.byPk());
-    for (const item of newItems) map.set(ex(item), item);
+    const hasFilter = Object.keys(filterParams).length > 0;
+    for (const item of newItems) {
+      const enriched = hasFilter ? { ...filterParams, ...(item as object) } as Row : item;
+      map.set(ex(enriched), enriched);
+    }
     this.byPk.set(map);
     this.items.set([...map.values()]);
   }

@@ -126,7 +126,7 @@ export class ResourceSilo {
       if (!res.ok) return;
       const { data, meta } = await res.json() as { data: Row[]; meta: { offset: number; limit: number; has_more: boolean } };
       if (offset === 0 && !searchQ && Object.keys(params).length === 0) this._setItems(data);
-      else this._mergeItems(data);
+      else this._mergeItems(data, otherParams);
       this.hasMore = meta.has_more;
       this.currentOffset = offset + data.length;
       if (!meta.has_more) this.loadedFilters.set(filterKey, true);
@@ -202,14 +202,18 @@ export class ResourceSilo {
     }
   }
 
-  private _mergeItems(newItems: Row[]): void {
+  private _mergeItems(newItems: Row[], filterParams: Row = {}): void {
     if (!this.pkExtractor) {
       this.items = [...this.items, ...newItems];
       return;
     }
     const ex = this.pkExtractor;
     const map = new Map(this.byPk);
-    for (const item of newItems) map.set(ex(item), item);
+    const hasFilter = Object.keys(filterParams).length > 0;
+    for (const item of newItems) {
+      const enriched = hasFilter ? { ...filterParams, ...(item as object) } as Row : item;
+      map.set(ex(enriched), enriched);
+    }
     this.byPk = map;
     this.items = [...map.values()];
   }
