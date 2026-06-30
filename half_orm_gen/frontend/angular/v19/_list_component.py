@@ -22,7 +22,7 @@ def _list_component(
         f'}}'
         for f in out_names
     )
-    action_th = '<th class="px-2 py-2 w-16"></th>' if has_del and pk_field else ''
+    action_th = '<th class="px-2 py-2 w-16"></th>' if pk_field else ''
 
     # Filter row (one input per column, hidden when embedded)
     filter_inputs = '\n              '.join(
@@ -42,7 +42,7 @@ def _list_component(
         'class="text-xs text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed" '
         'title="Clear all filters">✕</button>'
         '</th>'
-    ) if has_del and pk_field else ''
+    ) if pk_field else ''
     filter_row = (
         f'\n          @if (!embedded()) {{\n'
         f'          <tr class="bg-white border-b">\n'
@@ -85,10 +85,10 @@ def _list_component(
     cursor = ' cursor-pointer' if pk_field else ''
 
     action_td = ''
-    if has_del and pk_field:
+    if pk_field:
         action_td = (
             '\n              <td class="px-2 py-2">\n'
-            '                @if (silo.canDelete()) {\n'
+            '                @if (silo.canDelete(getPkId(item))) {\n'
             f'                  <button (click)="handleDelete(getPkId(item), $event)"\n'
             '                          class="text-red-600 hover:underline text-sm">Delete</button>\n'
             '                }\n'
@@ -106,7 +106,7 @@ def _list_component(
 
 
     delete_fn = ''
-    if has_del and pk_field:
+    if pk_field:
         delete_fn = (
             f'\n  handleDelete(id: string, e: Event): void {{\n'
             f'    e.stopPropagation();\n'

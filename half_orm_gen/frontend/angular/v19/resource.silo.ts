@@ -17,12 +17,10 @@ export class ResourceSilo {
   readonly selectedId = signal<string | null>(null);
   readonly sortField  = signal<string | null>(null);
   readonly sortAsc    = signal(true);
-  readonly dynamicRoles = signal<Record<string, string[]>>({});
+  readonly dynamicRoles = signal<Record<string, { ids: string[]; put_in?: string[]; put_out?: string[] }>>({});
 
   // Per-resource access signals — derived from AuthService at runtime
   readonly canCreate:             Signal<boolean>;
-  readonly canDelete:             Signal<boolean>;
-  readonly canEdit:               Signal<boolean>;
   readonly inaccessibleFields:    Signal<Set<string>>;
   readonly inaccessiblePostFields: Signal<Set<string>>;
   readonly inaccessiblePutFields:  Signal<Set<string>>;
@@ -50,8 +48,6 @@ export class ResourceSilo {
     }
 
     this.canCreate = computed(() => !!(auth.effectiveAccess() as any)[key]?.POST);
-    this.canDelete = computed(() => !!(auth.effectiveAccess() as any)[key]?.DELETE);
-    this.canEdit   = computed(() => !!(auth.effectiveAccess() as any)[key]?.PUT);
     this.inaccessibleFields = computed(() => {
       const allFields = schema.fields.map(f => f.name);
       const getAccess = (auth.effectiveAccess() as any)[key]?.GET;
@@ -68,11 +64,19 @@ export class ResourceSilo {
       return new Set(allFields.filter(f => !inFields.includes(f)));
     });
     this.inaccessiblePutFields = computed(() => {
-      const inFields: string[] | undefined = (auth.effectiveAccess() as any)[key]?.PUT?.in;
       const allFields = schema.fields.map(f => f.name);
-      if (inFields === undefined) return new Set<string>();
-      if (inFields.length === 0) return new Set(allFields);
-      return new Set(allFields.filter(f => !inFields.includes(f)));
+      const staticIn: string[] | undefined = (auth.effectiveAccess() as any)[key]?.PUT?.in;
+      if (staticIn !== undefined) {
+        if (staticIn.length === 0) return new Set(allFields);
+        return new Set(allFields.filter(f => !staticIn.includes(f)));
+      }
+      for (const rd of Object.values(this.dynamicRoles())) {
+        if (rd.put_in !== undefined) {
+          if (rd.put_in.length === 0) return new Set(allFields);
+          return new Set(allFields.filter(f => !rd.put_in!.includes(f)));
+        }
+      }
+      return new Set<string>();
     });
 
     registerClear(() => this.clear());
@@ -94,9 +98,14 @@ export class ResourceSilo {
     return this.pkExtractor ? this.pkExtractor(item) : null;
   }
 
-  canUpdateRow(id: string): boolean {
-    const dr = this.dynamicRoles();
-    return Object.values(dr).some(ids => ids.includes(id));
+  canUpdate(id: string): boolean {
+    if (!!(this.auth.effectiveAccess() as any)[this.key]?.PUT) return true;
+    return Object.values(this.dynamicRoles()).some(rd => rd.ids.includes(id));
+  }
+
+  canDelete(id: string): boolean {
+    if (!!(this.auth.effectiveAccess() as any)[this.key]?.DELETE) return true;
+    return Object.values(this.dynamicRoles()).some(rd => rd.ids.includes(id));
   }
 
   listUrl(params: Row = {}): string {
@@ -130,7 +139,7 @@ export class ResourceSilo {
     this.auth.fetchedRoutes.add(url);
 
     this.isLoading.set(true);
-    this.http.get<{ data: Row[]; meta: { offset: number; limit: number; has_more: boolean; dynamic_roles?: Record<string, string[]> } }>(
+    this.http.get<{ data: Row[]; meta: { offset: number; limit: number; has_more: boolean; dynamic_roles?: Record<string, { ids: string[]; put_in?: string[]; put_out?: string[] }> } }>(
       url, { headers: this.headers }
     ).pipe(
       catchError(() => of({ data: [], meta: { offset, limit: 100, has_more: false, dynamic_roles: undefined } }))
@@ -178,7 +187,7 @@ export class ResourceSilo {
     if (this.pkFields.length === 1) {
       const pk = this.pkFields[0];
       const url = this.listUrl({ [pk]: id });
-      return this.http.get<{ data: Row[]; meta: { dynamic_roles?: Record<string, string[]> } }>(
+      return this.http.get<{ data: Row[]; meta: { dynamic_roles?: Record<string, { ids: string[]; put_in?: string[]; put_out?: string[] }> } }>(
         url, { headers: this.headers }
       ).pipe(
         tap(resp => {

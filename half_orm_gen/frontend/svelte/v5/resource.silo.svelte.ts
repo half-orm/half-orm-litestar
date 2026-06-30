@@ -82,7 +82,7 @@ export class ResourceSilo {
     return this.pkExtractor ? this.pkExtractor(item) : null;
   }
 
-  canUpdateRow(id: string): boolean {
+  canUpdate(id: string): boolean {
     return Object.values(this.dynamicRoles).some(ids => ids.includes(id));
   }
 

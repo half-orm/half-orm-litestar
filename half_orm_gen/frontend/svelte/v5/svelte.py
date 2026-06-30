@@ -1470,7 +1470,7 @@ def _detail_page(
 
     map_key       = f'{schema_name}/{table_name}'
     edit_btn_wrap = (
-        f'\n      {{#if silo.canEdit || silo.canUpdateRow(id)}}{edit_btn}\n      {{/if}}'
+        f'\n      {{#if silo.canEdit || silo.canUpdate(id)}}{edit_btn}\n      {{/if}}'
         if has_put and visible_put else ''
     )
 
