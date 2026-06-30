@@ -49,26 +49,26 @@ export class ResourceSilo {
       this.pkExtractor = null;
     }
 
-    this.canCreate = computed(() => !!(auth.access() as any)[key]?.POST);
-    this.canDelete = computed(() => !!(auth.access() as any)[key]?.DELETE);
-    this.canEdit   = computed(() => !!(auth.access() as any)[key]?.PUT);
+    this.canCreate = computed(() => !!(auth.effectiveAccess() as any)[key]?.POST);
+    this.canDelete = computed(() => !!(auth.effectiveAccess() as any)[key]?.DELETE);
+    this.canEdit   = computed(() => !!(auth.effectiveAccess() as any)[key]?.PUT);
     this.inaccessibleFields = computed(() => {
       const allFields = schema.fields.map(f => f.name);
-      const getAccess = (auth.access() as any)[key]?.GET;
+      const getAccess = (auth.effectiveAccess() as any)[key]?.GET;
       if (!getAccess) return new Set<string>(allFields);
       const out: string[] | undefined = getAccess.out;
       if (!out || out.length === 0) return new Set<string>(allFields);
       return new Set(allFields.filter(f => !out.includes(f)));
     });
     this.inaccessiblePostFields = computed(() => {
-      const inFields: string[] | undefined = (auth.access() as any)[key]?.POST?.in;
+      const inFields: string[] | undefined = (auth.effectiveAccess() as any)[key]?.POST?.in;
       const allFields = schema.fields.map(f => f.name);
       if (inFields === undefined) return new Set<string>();
       if (inFields.length === 0) return new Set(allFields);
       return new Set(allFields.filter(f => !inFields.includes(f)));
     });
     this.inaccessiblePutFields = computed(() => {
-      const inFields: string[] | undefined = (auth.access() as any)[key]?.PUT?.in;
+      const inFields: string[] | undefined = (auth.effectiveAccess() as any)[key]?.PUT?.in;
       const allFields = schema.fields.map(f => f.name);
       if (inFields === undefined) return new Set<string>();
       if (inFields.length === 0) return new Set(allFields);

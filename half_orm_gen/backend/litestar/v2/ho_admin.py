@@ -12,7 +12,7 @@ from typing import Any
 from litestar import Request, get, post, put, delete
 from litestar.exceptions import HTTPException
 
-from half_orm_gen.backend.crud_helpers import _get_roles
+from half_orm_gen.backend.crud_helpers import _get_roles, _expand_roles, _filter_access_for_roles
 from half_orm_gen.backend.ho_api.loader import load_crud_access, load_role_parents
 from half_orm_gen.backend.ho_api.models import HoApiModels
 from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY
@@ -166,6 +166,15 @@ def make_ho_admin_handlers(
             filters = [{'id': str(r['id']), 'name': r['name']} for r in filter_rows]
 
             access: dict = {}
+            pmap = parent_map_holder[0]
+
+            def _ancestors(role: str) -> list[str]:
+                result, cur = [], pmap.get(role)
+                while cur:
+                    result.append(cur)
+                    cur = pmap.get(cur)
+                return result
+
             for verb in verbs:
                 acc_rows = await api.access()(
                     schema_name=schema, table_name=table, verb=verb
@@ -181,6 +190,21 @@ def make_ho_admin_handlers(
                         'in':             [r['field_name'] for r in in_rows],
                         'active_filters': [str(r['filter_id']) for r in af_rows],
                     }
+                for role, entry in verb_entry.items():
+                    direct_out = set(entry['out'])
+                    direct_in  = set(entry['in'])
+                    inh_out: list[str] = []
+                    inh_in:  list[str] = []
+                    for anc in _ancestors(role):
+                        if anc in verb_entry:
+                            for f in verb_entry[anc]['out']:
+                                if f not in direct_out and f not in inh_out:
+                                    inh_out.append(f)
+                            for f in verb_entry[anc]['in']:
+                                if f not in direct_in and f not in inh_in:
+                                    inh_in.append(f)
+                    entry['inherited_out'] = inh_out
+                    entry['inherited_in']  = inh_in
                 if verb_entry:
                     access[verb] = verb_entry
 
@@ -206,8 +230,15 @@ def make_ho_admin_handlers(
         result = await api.access()(
             role_name=role_name, schema_name=schema, table_name=table, verb=verb,
         ).ho_ainsert()
+        access_id = result['id']
+        pk_fields: list[str] = []
+        if verb != 'DELETE':
+            rel_cls = model.get_relation_class(f'{schema}.{table}')
+            pk_fields = list(rel_cls()._ho_pkey.keys())
+            for pk in pk_fields:
+                await api.field_access_out()(access_id=access_id, field_name=pk).ho_ainsert()
         await _reload(f'{schema}/{table}')
-        return {'id': str(result['id'])}
+        return {'id': str(access_id), 'pk_fields': pk_fields}
 
     @delete(f'{prefix}/ho_admin/access/{{id:str}}')
     async def ho_admin_delete_access(request: Request, id: str) -> None:
@@ -327,12 +358,19 @@ def make_ho_admin_handlers(
         if resource:
             await _reload(resource)
 
+    @get(f'{prefix}/ho_admin/simulate-access')
+    async def ho_admin_simulate_access(request: Request, role: str) -> dict:
+        _check_admin(request)
+        roles = _expand_roles([role], parent_map_holder[0])
+        return _filter_access_for_roles(access_map_holder[0], roles, parent_map_holder[0])
+
     return [
         ho_admin_roles,
         ho_admin_create_role,
         ho_admin_delete_role,
         ho_admin_set_role_parent,
         ho_admin_catalog,
+        ho_admin_simulate_access,
         ho_admin_create_access,
         ho_admin_delete_access,
         ho_admin_add_field_out,

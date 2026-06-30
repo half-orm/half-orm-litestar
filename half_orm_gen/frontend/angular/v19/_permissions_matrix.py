@@ -60,14 +60,15 @@ import type { Verb, VerbAccess } from './schema.types';
         @if (verb() === 'POST' || verb() === 'PUT') {
           <div>
             <div class="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1">in</div>
-            @if (access()!.in == null) {
-              <em class="text-gray-400">all fields</em>
-            } @else if (access()!.in!.length === 0) {
+            @if (!access()!.in?.length && !access()!.inherited_in?.length) {
               <em class="text-gray-400">none</em>
             } @else {
               <div class="flex flex-wrap gap-1 max-w-[200px]">
-                @for (f of access()!.in!; track f) {
+                @for (f of (access()!.in ?? []); track f) {
                   <span class="bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-mono text-[10px]">{{ f }}</span>
+                }
+                @for (f of (access()!.inherited_in ?? []); track f) {
+                  <span class="bg-gray-50 text-gray-400 border border-gray-200 px-1.5 py-0.5 rounded font-mono text-[10px] italic">{{ f }}</span>
                 }
               </div>
             }
@@ -75,14 +76,15 @@ import type { Verb, VerbAccess } from './schema.types';
         }
         <div>
           <div class="text-[10px] font-bold uppercase tracking-widest text-emerald-500 mb-1">out</div>
-          @if (access()!.out == null) {
-            <em class="text-gray-400">all fields</em>
-          } @else if (access()!.out!.length === 0) {
+          @if (!access()!.out?.length && !access()!.inherited_out?.length) {
             <em class="text-gray-400">none</em>
           } @else {
             <div class="flex flex-wrap gap-1 max-w-[200px]">
-              @for (f of access()!.out!; track f) {
+              @for (f of (access()!.out ?? []); track f) {
                 <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-mono text-[10px]">{{ f }}</span>
+              }
+              @for (f of (access()!.inherited_out ?? []); track f) {
+                <span class="bg-gray-50 text-gray-400 border border-gray-200 px-1.5 py-0.5 rounded font-mono text-[10px] italic">{{ f }}</span>
               }
             </div>
           }
@@ -100,10 +102,12 @@ export class PermissionsFieldsComponent {
 
 def _permissions_matrix_component_ts() -> str:
     return """\
-import { Component, ChangeDetectorRef, ElementRef, input, OnInit, ViewChild, inject } from '@angular/core';
+import { Component, ChangeDetectorRef, ElementRef, computed, input, OnInit, ViewChild, inject } from '@angular/core';
 import { PermissionsFieldsComponent } from './permissions-fields.component';
-import { AuthService } from '../core/auth.service';
-import type { Verb, VerbAccess, PermMatrix } from './schema.types';
+import { AuthService, CatalogEntry } from '../core/auth.service';
+import type { Verb, VerbAccess } from './schema.types';
+
+type RoleVerbAccess = { id: string; out: string[]; in: string[]; inherited_out: string[]; inherited_in: string[]; active_filters: string[] };
 
 @Component({
   selector: 'app-permissions-matrix',
@@ -128,13 +132,22 @@ import type { Verb, VerbAccess, PermMatrix } from './schema.types';
               </tr>
             </thead>
             <tbody>
-              @for (role of roles(); track role) {
-                <tr class="border-t" [class.bg-gray-100]="auth.userRoles().includes(role)">
+              @for (role of allRoles(); track role) {
+                <tr class="border-t hover:bg-gray-50 cursor-pointer"
+                    [class.bg-blue-50]="auth.simulatedRole() === role"
+                    [class.ring-1]="auth.simulatedRole() === role"
+                    [class.ring-blue-400]="auth.simulatedRole() === role"
+                    (click)="selectRole(role)">
                   <td class="px-4 py-2 font-mono border-r"
-                      [class]="auth.userRoles().includes(role) ? 'font-bold text-gray-900' : 'text-gray-700'">{{ role }}</td>
+                      [class.font-bold]="auth.simulatedRole() === role"
+                      [class.text-blue-700]="auth.simulatedRole() === role"
+                      [class.text-gray-700]="auth.simulatedRole() !== role">
+                    {{ role }}
+                    @if (isDynamic(role)) { <span class="ml-1 text-[9px] text-purple-500 font-semibold uppercase">dyn</span> }
+                  </td>
                   @for (verb of verbs; track verb) {
                     <td class="px-4 py-2 text-center">
-                      @if (permissions()[role]?.[verb]) {
+                      @if (hasAccess(role, verb)) {
                         <span class="text-green-600 cursor-default select-none"
                               (mouseenter)="onEnter($event, role, verb)"
                               (mouseleave)="onLeave()">✓</span>
@@ -147,11 +160,18 @@ import type { Verb, VerbAccess, PermMatrix } from './schema.types';
               }
             </tbody>
           </table>
+          @if (auth.simulatedRole()) {
+            <div class="px-4 py-2 border-t bg-blue-50 flex items-center gap-2 text-xs">
+              <span class="text-blue-700">Simulating <strong>{{ auth.simulatedRole() }}</strong></span>
+              <button (click)="auth.exitSimulation()"
+                      class="ml-auto text-blue-600 hover:text-blue-800 underline">Exit</button>
+            </div>
+          }
         </div>
       }
     </div>
 
-    <!-- shared popover — always in DOM so @ViewChild resolves even before first open -->
+    <!-- shared popover -->
     <div #tooltip popover="manual"
          style="padding:0;border:none;background:transparent;inset:unset;margin:0;overflow:visible">
       @if (hovered) {
@@ -159,38 +179,69 @@ import type { Verb, VerbAccess, PermMatrix } from './schema.types';
           <div class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-2">
             {{ hovered.role }} · {{ hovered.verb }}
           </div>
-          <app-permissions-fields
-            [access]="permissions()[hovered.role]![hovered.verb]"
-            [verb]="hovered.verb" />
+          <app-permissions-fields [access]="hoveredAccess()" [verb]="hovered.verb" />
         </div>
       }
     </div>
   `,
 })
 export class PermissionsMatrixComponent implements OnInit {
-  readonly permissions = input<PermMatrix>({});
-  readonly roles       = input<string[]>([]);
-  readonly defaultOpen = input(false);
+  readonly catalogEntry = input<CatalogEntry | null>(null);
+  readonly defaultOpen  = input(false);
   @ViewChild('tooltip') private tooltipEl!: ElementRef<HTMLElement>;
 
   open = false;
-
   ngOnInit(): void { this.open = this.defaultOpen(); }
+
   readonly verbs: Verb[] = ['GET', 'POST', 'PUT', 'DELETE'];
   hovered: { role: string; verb: Verb } | null = null;
 
   readonly auth = inject(AuthService);
-  private cdr = inject(ChangeDetectorRef);
+  private cdr   = inject(ChangeDetectorRef);
+
+  readonly allRoles = computed<string[]>(() => {
+    const entry = this.catalogEntry();
+    if (!entry) return [];
+    const roles = new Set<string>();
+    for (const verbEntry of Object.values(entry.access)) {
+      for (const role of Object.keys(verbEntry)) roles.add(role);
+    }
+    return [...roles].sort();
+  });
+
+  hasAccess(role: string, verb: string): boolean {
+    return !!this.catalogEntry()?.access[verb]?.[role];
+  }
+
+  isDynamic(role: string): boolean {
+    return this.catalogEntry()?.dynamic_roles.includes(role) ?? false;
+  }
+
+  selectRole(role: string): void {
+    if (this.auth.simulatedRole() === role) this.auth.exitSimulation();
+    else void this.auth.simulateRole(role);
+  }
+
+  hoveredAccess(): VerbAccess | undefined {
+    if (!this.hovered) return undefined;
+    const raw = this.catalogEntry()?.access[this.hovered.verb]?.[this.hovered.role] as RoleVerbAccess | undefined;
+    if (!raw) return undefined;
+    return {
+      in:           raw.in,
+      out:          raw.out,
+      inherited_in:  raw.inherited_in  ?? [],
+      inherited_out: raw.inherited_out ?? [],
+    };
+  }
 
   onEnter(event: MouseEvent, role: string, verb: Verb): void {
     if (verb === 'DELETE') return;
     this.hovered = { role, verb };
-    // Synchronously update template so popover content is ready before showPopover()
     this.cdr.detectChanges();
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
     const el = this.tooltipEl.nativeElement;
     el.style.left = `${rect.left + rect.width / 2}px`;
-    el.style.top = `${rect.top - 8}px`;
+    el.style.top  = `${rect.top - 8}px`;
     el.style.transform = 'translate(-50%, -100%)';
     el.showPopover();
   }

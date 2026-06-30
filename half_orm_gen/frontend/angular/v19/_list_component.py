@@ -176,7 +176,7 @@ def _list_component(
   }});"""
 
     router_link_es  = "import { RouterLink } from '@angular/router';\n" if needs_router_link else ''
-    _comp_imports = []
+    _comp_imports = ['PermissionsMatrixComponent']
     if needs_router_link:
         _comp_imports.insert(0, 'RouterLink')
     imports_str = ', '.join(_comp_imports)
@@ -198,6 +198,9 @@ def _list_component(
   <div class="flex justify-between items-center mb-4">
     <h1 class="text-2xl font-bold">{title}</h1>{new_btn}
   </div>
+  @if (auth.isAdmin()) {{
+    <app-permissions-matrix [catalogEntry]="auth.catalog()['{map_key}'] ?? null" />
+  }}
 }}
 <div [class]="embedded() ? 'overflow-x-auto' : 'bg-white shadow-sm rounded-lg overflow-auto max-h-[calc(100vh-10rem)]'">
   <table class="w-full border-collapse">
@@ -247,6 +250,7 @@ import type {{ Row }} from '../../../generated/resource.silo';
 import {{ AuthService }} from '../../../core/auth.service';
 import {{ isValidFilterValue, normalizeFilterValue, matchFilter, fmtCell, cellTitle, parseFiltersFromUrl, encodeFiltersToUrlParams }} from '../../../generated/stores/filters';
 import type {{ FieldType }} from '../../../generated/stores/filters';
+import {{ PermissionsMatrixComponent }} from '../../../generated/permissions-matrix.component';
 @Component({{
   selector: '{_selector(schema_name, table_name, 'list')}',
   standalone: true,
@@ -288,6 +292,7 @@ export class {iname}ListComponent {{
       const _token = this.auth.token();
       const _v    = this.auth.accessVersion();
       const _rv   = this.auth.resourceAccessVersion()['{map_key}'];
+      const _sim  = this.auth.simulatedRole();
       this.silo.list(this.filters());
     }});{ws_effect}
 

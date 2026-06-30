@@ -20,6 +20,15 @@ export interface HoUser {{
   is_admin: boolean;
 }}
 
+export type CatalogEntry = {{
+  fields: string[];
+  pk_fields: string[];
+  fields_with_defaults: string[];
+  dynamic_roles: string[];
+  filters: {{ id: string; name: string }}[];
+  access: Record<string, Record<string, {{ id: string; out: string[]; in: string[]; active_filters: string[] }}>>;
+}};
+
 @Injectable({{ providedIn: 'root' }})
 export class AuthService {{
   private router = inject(Router);
@@ -35,6 +44,11 @@ export class AuthService {{
   readonly resourceAccessVersion = signal<Record<string, number>>({{}});
   readonly wsEvent$             = new Subject<WsEvent>();
   readonly fetchedRoutes        = new Set<string>();
+
+  readonly catalog        = signal<Partial<Record<string, CatalogEntry>>>({{}});
+  readonly simulatedRole  = signal<string | null>(null);
+  readonly simulatedAccess = signal<Record<string, any> | null>(null);
+  readonly effectiveAccess = computed(() => this.simulatedAccess() ?? this.access());
 
   readonly userId = computed<string | null>(() => {{
     const t = this.token();
@@ -66,6 +80,7 @@ export class AuthService {{
     this.token.set(jwt);
     this.fetchedRoutes.clear();
     clearAllStates();
+    this.exitSimulation();
     void this._fetchAccess();
     void this._fetchRoles();
     void this._fetchUsers();
@@ -76,11 +91,56 @@ export class AuthService {{
     this.token.set(null);
     this.fetchedRoutes.clear();
     clearAllStates();
+    this.exitSimulation();
     if (this.router.url.includes('f_')) {{
       void this.router.navigate([this.router.url.split('?')[0]], {{ queryParams: {{}} }});
     }}
     void this._fetchAccess();
     void this._fetchRoles();
+  }}
+
+  async simulateRole(role: string): Promise<void> {{
+    const hdrs: Record<string, string> = this.token()
+      ? {{ Authorization: `Bearer ${{this.token()}}` }}
+      : {{}};
+    try {{
+      const res = await fetch(`{version_prefix}/ho_admin/simulate-access?role=${{encodeURIComponent(role)}}`, {{ headers: hdrs }});
+      if (res.ok) {{
+        this.simulatedAccess.set(await res.json());
+        this.simulatedRole.set(role);
+        this.fetchedRoutes.clear();
+        clearAllStates();
+      }}
+    }} catch {{}}
+  }}
+
+  exitSimulation(): void {{
+    this.simulatedRole.set(null);
+    this.simulatedAccess.set(null);
+    this.fetchedRoutes.clear();
+    clearAllStates();
+  }}
+
+  async _refreshSimulation(): Promise<void> {{
+    const role = this.simulatedRole();
+    if (!role) return;
+    const hdrs: Record<string, string> = this.token()
+      ? {{ Authorization: `Bearer ${{this.token()}}` }}
+      : {{}};
+    try {{
+      const res = await fetch(`{version_prefix}/ho_admin/simulate-access?role=${{encodeURIComponent(role)}}`, {{ headers: hdrs }});
+      if (res.ok) this.simulatedAccess.set(await res.json());
+    }} catch {{}}
+  }}
+
+  async _fetchCatalog(): Promise<void> {{
+    const hdrs: Record<string, string> = this.token()
+      ? {{ Authorization: `Bearer ${{this.token()}}` }}
+      : {{}};
+    try {{
+      const res = await fetch('{version_prefix}/ho_admin/catalog', {{ headers: hdrs }});
+      if (res.ok) this.catalog.set(await res.json());
+    }} catch {{}}
   }}
 
   async loginWithEmail(email: string): Promise<void> {{
@@ -123,7 +183,10 @@ export class AuthService {{
   async _fetchUsers(): Promise<void> {{
     try {{
       const res = await fetch('{version_prefix}/ho_users');
-      if (res.ok) this.users.set(await res.json());
+      if (res.ok) {{
+        this.users.set(await res.json());
+        if (this.isAdmin()) void this._fetchCatalog();
+      }}
     }} catch {{}}
   }}
 
@@ -141,11 +204,15 @@ export class AuthService {{
       }}
       clearStateForKey(resource);
       await this._fetchAccess();
+      if (this.isAdmin()) void this._fetchCatalog();
+      if (this.simulatedRole()) await this._refreshSimulation();
       this.resourceAccessVersion.update(v => ({{ ...v, [resource]: (v[resource] ?? 0) + 1 }}));
     }} else {{
       this.fetchedRoutes.clear();
       clearAllStates();
       await Promise.all([this._fetchAccess(), this._fetchRoles()]);
+      if (this.isAdmin()) void this._fetchCatalog();
+      if (this.simulatedRole()) await this._refreshSimulation();
       this.accessVersion.update(v => v + 1);
     }}
   }}
@@ -295,6 +362,15 @@ const API_BASE = '{api_base}';
             </div>
           </aside>
           <main class="flex-1 overflow-y-auto p-6">
+            @if (auth.simulatedRole()) {{
+              <div class="mb-4 flex items-center gap-3 px-4 py-2 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-800">
+                <span>⚠ Simulation mode — viewing as <strong>{{{{ auth.simulatedRole() }}}}</strong></span>
+                <button (click)="auth.exitSimulation()"
+                        class="ml-auto px-2 py-1 bg-amber-200 hover:bg-amber-300 rounded text-amber-900 font-medium transition-colors">
+                  Exit simulation
+                </button>
+              </div>
+            }}
             <router-outlet />
           </main>
         </div>
