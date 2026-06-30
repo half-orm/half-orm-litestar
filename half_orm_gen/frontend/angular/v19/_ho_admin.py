@@ -108,9 +108,6 @@ const VERB_COLOR: Record<string, string> = {{
                 <!-- Resource header -->
                 <div class="px-4 py-2 bg-gray-50 border-b flex items-center gap-2">
                   <span class="font-mono text-sm font-semibold text-gray-700">{{{{ entry[0] }}}}</span>
-                  @for (dr of entry[1].dynamic_roles; track dr) {{
-                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-purple-100 text-purple-600">{{{{ dr }}}}</span>
-                  }}
                 </div>
 
                 <!-- Verb checkboxes -->
@@ -272,7 +269,16 @@ export class HoAdminComponent implements OnInit {{
 
   readonly verbs = ['GET', 'POST', 'PUT', 'DELETE'] as const;
 
-  readonly catalogEntries = computed(() => Object.entries(this.catalog()).sort((a, b) => a[0].localeCompare(b[0])));
+  readonly catalogEntries = computed(() => {{
+    const role = this.selectedRole();
+    const entries = Object.entries(this.catalog()).sort((a, b) => a[0].localeCompare(b[0]));
+    if (!role) return entries;
+    const roleInfo = this.roles().find(r => r.name === role);
+    if (roleInfo?.kind === 'dynamic') {{
+      return entries.filter(([, info]) => (info as ResourceInfo).dynamic_roles.includes(role));
+    }}
+    return entries;
+  }});
 
   readonly parentMap = computed(() =>
     Object.fromEntries(this.roles().map(r => [r.name, r.parent_name ?? null]))

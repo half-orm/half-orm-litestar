@@ -171,17 +171,21 @@ def _make_list_handler(
         data = await inst.ho_aselect(*(projection or []), limit=limit, offset=offset)
         dynamic_roles: dict = {}
         crud_access = crud_access_by_res.get(resource, {})
+        _all_verbs = ('GET', 'POST', 'PUT', 'DELETE')
         dyn_methods = [
             (rn, fn) for (s, t, rn), fn in _ROLE_REGISTRY.items()
             if s == schema_name and t == table_name
-            and any(rn in crud_access.get(v, {}) for v in ('PUT', 'DELETE'))
+            and any(rn in crud_access.get(v, {}) for v in _all_verbs)
         ]
         if dyn_methods and data and getattr(request.state, 'user', None):
             resolver_inst = cls()
             for role_name, fn in dyn_methods:
                 pk_set = fn(resolver_inst, request, data)
                 if pk_set:
-                    role_data: dict = {'ids': [str(pk) for pk in pk_set]}
+                    role_data: dict = {
+                        'ids': [str(pk) for pk in pk_set],
+                        'verbs': [v for v in _all_verbs if role_name in crud_access.get(v, {})],
+                    }
                     put_entry = crud_access.get('PUT', {}).get(role_name)
                     if isinstance(put_entry, dict):
                         role_data['put_in']  = put_entry.get('in', [])

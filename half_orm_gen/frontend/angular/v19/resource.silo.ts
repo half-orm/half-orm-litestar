@@ -17,7 +17,7 @@ export class ResourceSilo {
   readonly selectedId = signal<string | null>(null);
   readonly sortField  = signal<string | null>(null);
   readonly sortAsc    = signal(true);
-  readonly dynamicRoles = signal<Record<string, { ids: string[]; put_in?: string[]; put_out?: string[] }>>({});
+  readonly dynamicRoles = signal<Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }>>({});
 
   // Per-resource access signals — derived from AuthService at runtime
   readonly canCreate:             Signal<boolean>;
@@ -100,12 +100,12 @@ export class ResourceSilo {
 
   canUpdate(id: string): boolean {
     if (!!(this.auth.effectiveAccess() as any)[this.key]?.PUT) return true;
-    return Object.values(this.dynamicRoles()).some(rd => rd.ids.includes(id));
+    return Object.values(this.dynamicRoles()).some(rd => rd.verbs.includes('PUT') && rd.ids.includes(id));
   }
 
   canDelete(id: string): boolean {
     if (!!(this.auth.effectiveAccess() as any)[this.key]?.DELETE) return true;
-    return Object.values(this.dynamicRoles()).some(rd => rd.ids.includes(id));
+    return Object.values(this.dynamicRoles()).some(rd => rd.verbs.includes('DELETE') && rd.ids.includes(id));
   }
 
   listUrl(params: Row = {}): string {
@@ -139,7 +139,7 @@ export class ResourceSilo {
     this.auth.fetchedRoutes.add(url);
 
     this.isLoading.set(true);
-    this.http.get<{ data: Row[]; meta: { offset: number; limit: number; has_more: boolean; dynamic_roles?: Record<string, { ids: string[]; put_in?: string[]; put_out?: string[] }> } }>(
+    this.http.get<{ data: Row[]; meta: { offset: number; limit: number; has_more: boolean; dynamic_roles?: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> } }>(
       url, { headers: this.headers }
     ).pipe(
       catchError(() => of({ data: [], meta: { offset, limit: 100, has_more: false, dynamic_roles: undefined } }))
@@ -187,7 +187,7 @@ export class ResourceSilo {
     if (this.pkFields.length === 1) {
       const pk = this.pkFields[0];
       const url = this.listUrl({ [pk]: id });
-      return this.http.get<{ data: Row[]; meta: { dynamic_roles?: Record<string, { ids: string[]; put_in?: string[]; put_out?: string[] }> } }>(
+      return this.http.get<{ data: Row[]; meta: { dynamic_roles?: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> } }>(
         url, { headers: this.headers }
       ).pipe(
         tap(resp => {

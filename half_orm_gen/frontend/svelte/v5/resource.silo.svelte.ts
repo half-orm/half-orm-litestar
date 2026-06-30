@@ -14,7 +14,7 @@ export class ResourceSilo {
   selectedId   = $state<string | null>(null);
   sortField    = $state<string | null>(null);
   sortAsc      = $state(true);
-  dynamicRoles = $state<Record<string, { ids: string[]; put_in?: string[]; put_out?: string[] }>>({});
+  dynamicRoles = $state<Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }>>({});
 
   // Per-resource access signals — derived from auth at runtime
   canCreate          = $derived(!!(auth.access as any)[this.key]?.POST);
@@ -90,12 +90,12 @@ export class ResourceSilo {
 
   canUpdate(id: string): boolean {
     if (!!(auth.access as any)[this.key]?.PUT) return true;
-    return Object.values(this.dynamicRoles).some(rd => rd.ids.includes(id));
+    return Object.values(this.dynamicRoles).some(rd => rd.verbs.includes('PUT') && rd.ids.includes(id));
   }
 
   canDelete(id: string): boolean {
     if (!!(auth.access as any)[this.key]?.DELETE) return true;
-    return Object.values(this.dynamicRoles).some(rd => rd.ids.includes(id));
+    return Object.values(this.dynamicRoles).some(rd => rd.verbs.includes('DELETE') && rd.ids.includes(id));
   }
 
   listUrl(params: Row = {}): string {
@@ -132,7 +132,7 @@ export class ResourceSilo {
     try {
       const res = await fetch(url, { headers: this.hdrs });
       if (!res.ok) return;
-      const { data, meta } = await res.json() as { data: Row[]; meta: { offset: number; limit: number; has_more: boolean; dynamic_roles?: Record<string, { ids: string[]; put_in?: string[]; put_out?: string[] }> } };
+      const { data, meta } = await res.json() as { data: Row[]; meta: { offset: number; limit: number; has_more: boolean; dynamic_roles?: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> } };
       if (offset === 0 && !searchQ && Object.keys(params).length === 0) this._setItems(data);
       else this._mergeItems(data, otherParams);
       this.hasMore = meta.has_more;
@@ -176,7 +176,7 @@ export class ResourceSilo {
       const url = this.listUrl({ [pk]: id });
       const res = await fetch(url, { headers: this.hdrs });
       if (!res.ok) return null;
-      const { data, meta } = await res.json() as { data: Row[]; meta: { dynamic_roles?: Record<string, { ids: string[]; put_in?: string[]; put_out?: string[] }> } };
+      const { data, meta } = await res.json() as { data: Row[]; meta: { dynamic_roles?: Record<string, { ids: string[]; verbs: string[]; put_in?: string[]; put_out?: string[] }> } };
       if (data[0]) this.setItem(data[0]);
       this.dynamicRoles = meta?.dynamic_roles ?? {};
       return data[0] ?? null;
