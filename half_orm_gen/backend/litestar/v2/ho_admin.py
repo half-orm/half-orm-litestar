@@ -19,6 +19,12 @@ from half_orm_gen.backend.ho_api.registry import _ROLE_REGISTRY
 from half_orm_gen.backend.litestar.v2.runtime import _manager
 
 
+def _is_server_generated_default(dv: str) -> bool:
+    """True only for function-based or current_* defaults — not simple scalars like 'false' or '0'."""
+    dv = dv.lower().strip()
+    return dv.startswith('current') or '(' in dv
+
+
 def _check_admin(request: Request) -> list[str]:
     roles = _get_roles(request)
     if 'admin' not in roles:
@@ -158,6 +164,7 @@ def make_ho_admin_handlers(
             fields_with_defaults = [
                 f for f, obj in ho_fields.items()
                 if getattr(obj, 'has_default_value', None) is not None
+                and _is_server_generated_default(obj.has_default_value)
             ]
 
             fk_deps = []

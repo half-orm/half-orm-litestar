@@ -14,9 +14,9 @@ Implémenté via `fk_auto` : table `field_access_fk_auto`, trois types (`connect
 
 Réalisé : `<PermissionsMatrix>` supprimée des pages list/detail, matrice réservée à l'admin Angular alimentée par `/ho_admin/catalog`, simulation de rôle (`simulateRole` / `exitSimulation`) avec bannière.
 
-## 4. Champs avec valeur par défaut marqués « auto » à tort dans les formulaires PUT
+## ~~4. Champs avec valeur par défaut marqués « auto » à tort dans les formulaires PUT~~ ✓
 
-`_is_server_generated` traite comme auto tout champ ayant une valeur par défaut DB (ex. `published DEFAULT false`), ce qui les exclut des formulaires d'édition. Ce traitement doit être réservé aux clefs primaires et aux champs générés par le serveur (séquences, `DEFAULT gen_random_uuid()`, etc.). Les champs avec une simple valeur par défaut doivent rester éditables.
+`_is_server_generated_default` dans `ho_admin.py` restreint `fields_with_defaults` aux seules valeurs serveur (`current*`, appels de fonctions `()`). `published DEFAULT false` n'est plus marqué auto et est disponible dans POST IN.
 
 ## ~~5. Admin — droits d'accès hérités par le parent~~ ✓
 
@@ -57,7 +57,17 @@ half_orm gen frontend --angular --display blog.post   # vue lecture seule
 
 **Lien avec searchable** : le composant `--list` pourrait intégrer automatiquement la barre de recherche si des champs `searchable` sont configurés.
 
-## 9. Protection du dernier admin — backend
+## 9. État des filtres `@ho_api_filter` — audit et vérification
+
+Remettre à plat l'état d'avancement des filtres déclarés via `@ho_api_filter`. Points à vérifier :
+
+- Le décorateur `@ho_api_filter` est-il correctement découvert et enregistré au démarrage ?
+- Les filtres sont-ils propagés dans `/ho_admin/catalog` (champ `filters` par ressource) ?
+- L'admin UI permet-il d'activer/désactiver un filtre par accès (table `access_filter`) ?
+- Le handler GET applique-t-il bien le filtre quand il est activé pour le rôle courant ?
+- Les filtres apparaissent-ils dans `/ho_access` (frontend peut les connaître) ?
+
+## 10. Protection du dernier admin — backend
 
 La suppression d'un utilisateur ou d'une association `user_role` qui retire le dernier admin laisse le système dans un état irrécupérable (plus personne ne peut accéder à l'interface admin). Le backend doit refuser toute opération (DELETE sur `actor/user`, DELETE sur `half_orm_meta_api/user_role`, PUT qui retire le flag admin) qui ferait tomber à zéro le nombre d'utilisateurs ayant le rôle `admin`.
 

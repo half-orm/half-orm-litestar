@@ -182,7 +182,7 @@ const VERB_COLOR: Record<string, string> = {{
                                 <span class="font-mono"
                                       [class]="panelInfo()!.fields_with_defaults.includes(f) ? 'text-gray-400' : (panelAccess()?.fk_auto?.[f] ? 'text-purple-600' : 'text-gray-700')">{{{{ f }}}}</span>
                                 @if (panelInfo()!.fields_with_defaults.includes(f)) {{
-                                  <span class="text-[9px] bg-gray-100 text-gray-400 px-1 rounded" title="Has DB default — won't appear in forms">auto</span>
+                                  <span class="text-[9px] bg-gray-100 text-gray-400 px-1 rounded" title="Server-generated — cannot be set in forms">auto</span>
                                 }} @else if (panelAccess()?.fk_auto?.[f]) {{
                                   <span class="text-[9px] bg-purple-50 text-purple-500 px-1 rounded">{{{{ panelAccess()!.fk_auto[f] }}}}</span>
                                 }}
