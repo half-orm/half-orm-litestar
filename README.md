@@ -62,11 +62,22 @@ and the areas where help is most needed.
 
 ## Documentation
 
-- [Backend architecture](docs/backend-architecture.md) — runtime, CRUD_ACCESS, role system, WebSocket
-- [Frontend architecture](docs/frontend-architecture.md) — silo pattern, access map, live updates
-- [Generated frontend code](docs/frontend-code-organization.md) — file layout, regenerated vs scaffolded
-- [Angular silo architecture](docs/angular-silo-architecture.md)
-- [Svelte silo architecture](docs/svelte-silo-architecture.md)
+**Backend**
+- [Litestar architecture](docs/backend/litestar/architecture.md) — runtime, CRUD_ACCESS, role system, WebSocket
+- [Authorization](docs/backend/authorization.md) — JWT, roles, `/ho_access`, `/ho_setup`
+- [CRUD access](docs/backend/crud-access.md) — access model, verbs, field access
+
+**Frontend (shared)**
+- [Frontend architecture](docs/frontend/architecture.md) — silo pattern, access map, live updates
+- [Generated frontend code](docs/frontend/code-organization.md) — file layout, regenerated vs scaffolded
+
+**Angular**
+- [Silo architecture](docs/angular/silo-architecture.md) — signals, data flow, deduplication
+- [Access control](docs/angular/access-control.md) — reactive buttons, FK auto-resolve, dynamic roles, simulation
+
+**Svelte**
+- [Silo architecture](docs/svelte/silo-architecture.md) — runes, data flow, deduplication
+- [Access control](docs/svelte/access-control.md) — reactive buttons, FK auto-resolve, dynamic roles
 
 ---
 

@@ -1,7 +1,7 @@
 # Authorization
 
-> Role declaration and CRUD_ACCESS: [crud_access.md](crud_access.md)  
-> Backend runtime internals: [backend-architecture.md](backend-architecture.md)
+> Role declaration and CRUD_ACCESS: [crud-access.md](crud-access.md)  
+> Backend runtime internals: [litestar/architecture.md](litestar/architecture.md)
 
 ---
 

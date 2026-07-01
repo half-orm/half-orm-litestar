@@ -862,7 +862,7 @@ def _list_component(
     if pk_field:
         action_td = (
             f'<td class="px-2 py-2">\n'
-            f'          {{#if silo.canDelete(String({pk_item_expr}))}}\n'
+            f'          {{#if silo.canAccess(\'DELETE\', String({pk_item_expr}))}}\n'
             f'            <button'
             f' onclick={{(e) => {{ e.stopPropagation(); handleDelete({pk_item_expr}); }}}}'
             f'\n                    class="text-red-600 hover:underline text-sm">Delete</button>\n'
@@ -1490,7 +1490,7 @@ def _detail_page(
 
     map_key       = f'{schema_name}/{table_name}'
     edit_btn_wrap = (
-        f'\n      {{#if silo.canUpdate(id)}}{edit_btn}\n      {{/if}}'
+        f'\n      {{#if silo.canAccess(\'PUT\', id)}}{edit_btn}\n      {{/if}}'
         if has_put and visible_put else ''
     )
 

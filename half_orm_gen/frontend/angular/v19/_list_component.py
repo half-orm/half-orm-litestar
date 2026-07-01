@@ -88,7 +88,7 @@ def _list_component(
     if pk_field:
         action_td = (
             '\n              <td class="px-2 py-2">\n'
-            '                @if (silo.canDelete(getPkId(item))) {\n'
+            '                @if (silo.canAccess("DELETE", getPkId(item))) {\n'
             f'                  <button (click)="handleDelete(getPkId(item), $event)"\n'
             '                          class="text-red-600 hover:underline text-sm">Delete</button>\n'
             '                }\n'

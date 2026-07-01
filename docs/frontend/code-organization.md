@@ -1,8 +1,8 @@
 # halfORM Backoffice — Generated frontend code organization
 
-> See also: [frontend-architecture.md](frontend-architecture.md) for runtime principles,
-> [svelte-silo-architecture.md](svelte-silo-architecture.md) and
-> [angular-silo-architecture.md](angular-silo-architecture.md) for silo details.
+> See also: [architecture.md](architecture.md) for runtime principles,
+> [../svelte/silo-architecture.md](../svelte/silo-architecture.md) and
+> [../angular/silo-architecture.md](../angular/silo-architecture.md) for silo details.
 
 Generated with:
 ```

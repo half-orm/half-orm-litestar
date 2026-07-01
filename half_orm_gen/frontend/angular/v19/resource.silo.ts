@@ -111,14 +111,9 @@ export class ResourceSilo {
     return this.pkExtractor ? this.pkExtractor(item) : null;
   }
 
-  canUpdate(id: string): boolean {
-    if (!!(this.auth.effectiveAccess() as any)[this.key]?.PUT) return true;
-    return Object.values(this.dynamicRoles()).some(rd => rd.verbs.includes('PUT') && rd.ids.includes(id));
-  }
-
-  canDelete(id: string): boolean {
-    if (!!(this.auth.effectiveAccess() as any)[this.key]?.DELETE) return true;
-    return Object.values(this.dynamicRoles()).some(rd => (rd as any).verbs.includes('DELETE') && (rd as any).ids.includes(id));
+  canAccess(verb: string, id: string): boolean {
+    if (!!(this.auth.effectiveAccess() as any)[this.key]?.[verb]) return true;
+    return Object.values(this.dynamicRoles()).some(rd => (rd as any).verbs.includes(verb) && (rd as any).ids.includes(id));
   }
 
   canCreateWithFilters(filters: Record<string, unknown>): boolean {

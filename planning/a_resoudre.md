@@ -18,13 +18,9 @@ Réalisé : `<PermissionsMatrix>` supprimée des pages list/detail, matrice rés
 
 `_is_server_generated` traite comme auto tout champ ayant une valeur par défaut DB (ex. `published DEFAULT false`), ce qui les exclut des formulaires d'édition. Ce traitement doit être réservé aux clefs primaires et aux champs générés par le serveur (séquences, `DEFAULT gen_random_uuid()`, etc.). Les champs avec une simple valeur par défaut doivent rester éditables.
 
-## 5. Admin — droits d'accès hérités par le parent
+## ~~5. Admin — droits d'accès hérités par le parent~~ ✓
 
-Quand un verbe est déjà accessible via le rôle parent (ex. `connected` a GET, `author` hérite de `connected`), cliquer sur le verbe pour `author` exige d'abord "+ defined for author" avant de pouvoir configurer les champs. C'est gênant.
-
-Le comportement attendu : si le parent couvre déjà le verbe, la configuration de champs devrait être directement accessible sans étape intermédiaire.
-
-**Corollaire — verbes hérités toujours grisés** : quand un verbe est coché pour un rôle parce qu'il est hérité d'un rôle parent, la case doit être grisée (non-interactive) pour le rôle enfant — la décocher n'a aucun sens. Dans le panneau « field access » pour un verbe hérité, l'utilisateur ne peut qu'**ajouter** des champs non encore hérités, ou **décocher** les champs qu'il a lui-même ajoutés (pas ceux qui viennent du parent). Les champs hérités doivent être affichés en lecture seule/grisé, exactement comme dans la matrice des permissions (tooltip).
+`openPanel` auto-crée l'own entry si hérité, `hasAncestorVerb` verrouille la checkbox même après création, warning supprimé sur verbe couvert par un ancêtre.
 
 ## 6. Rôles dynamiques — résolution systématique pour tous les verbes
 
@@ -50,3 +46,19 @@ Ajouter un flag `searchable` par champ **par accès/rôle** dans l'interface Adm
 **Niveau de stockage** : par accès/rôle (comme `field_access_in`/`field_access_out`), pas global par ressource — ce qui permet la granularité par rôle.
 
 **À propager** : dans le catalog `/ho_admin/catalog`, dans `/ho_access` (par verb GET), et dans les silos frontend (`searchableFields` signal).
+
+## 8. Scaffold de composants personnalisés — `half_orm gen frontend --list|--edit|--display <schema.table>`
+
+Ajouter des sous-commandes de scaffold pour générer un composant unique sans régénérer tout le frontend :
+
+```bash
+half_orm gen frontend --angular --list blog.post      # liste filtrée standalone
+half_orm gen frontend --angular --edit blog.post      # formulaire d'édition seul
+half_orm gen frontend --angular --display blog.post   # vue lecture seule
+```
+
+**Cas d'usage** : intégrer une liste filtrée de `blog.post` dans une page applicative existante (hors backoffice généré), ou générer un composant de sélection pour un FK `select`.
+
+**Ce que ça génère** : le composant Angular/Svelte correspondant (fichier `.ts` + `.html` ou `.svelte`), pré-câblé sur le silo de la ressource, avec les guards d'accès. Le fichier est placé dans un répertoire `custom/` pour ne pas être écrasé par un `gen frontend` complet.
+
+**Lien avec searchable** : le composant `--list` pourrait intégrer automatiquement la barre de recherche si des champs `searchable` sont configurés.

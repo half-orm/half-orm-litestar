@@ -2,9 +2,10 @@
 
 ## Overview
 
-> General principles (silo pattern, route cache, WebSocket): [frontend-architecture.md](frontend-architecture.md)  
-> Svelte equivalent: [svelte-silo-architecture.md](svelte-silo-architecture.md)  
-> Backend API: [backend-architecture.md](backend-architecture.md)
+> General principles (silo pattern, route cache, WebSocket): [frontend/architecture.md](../frontend/architecture.md)  
+> Svelte equivalent: [svelte/silo-architecture.md](../svelte/silo-architecture.md)  
+> Backend API: [backend/litestar/architecture.md](../backend/litestar/architecture.md)  
+> Access control (signals, buttons, FK auto-resolve): [access-control.md](access-control.md)
 
 The Angular frontend uses a **silo-per-resource** pattern: one `ResourceSilo` instance per
 database relation, all registered in a singleton `SiloRegistry` service. There is no Angular

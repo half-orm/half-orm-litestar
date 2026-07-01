@@ -1,9 +1,9 @@
 # halfORM Backoffice — Backend architecture
 
-> Frontend consumption of this API: [frontend-architecture.md](frontend-architecture.md)  
-> Svelte silo details: [svelte-silo-architecture.md](svelte-silo-architecture.md)  
-> Angular silo details: [angular-silo-architecture.md](angular-silo-architecture.md)  
-> Authorization setup: [authorization.md](authorization.md)
+> Frontend consumption of this API: [frontend/architecture.md](../../frontend/architecture.md)  
+> Svelte silo details: [svelte/silo-architecture.md](../../svelte/silo-architecture.md)  
+> Angular silo details: [angular/silo-architecture.md](../../angular/silo-architecture.md)  
+> Authorization setup: [authorization.md](../authorization.md)
 
 Two API frameworks are supported, selected at generation time:
 
