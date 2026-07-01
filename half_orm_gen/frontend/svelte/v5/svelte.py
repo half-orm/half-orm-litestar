@@ -338,10 +338,10 @@ def _login_page(version_prefix: str) -> str:
 
 <div class="flex flex-col items-center justify-center h-full text-gray-400 text-sm gap-2">
   {#if auth.token}
-    <p>Logged in as <span class="font-semibold text-gray-700">{auth.token}</span></p>
+    <p>Signed in as <span class="font-semibold text-gray-700">{auth.displayName}</span></p>
     <p>Select a resource from the sidebar.</p>
   {:else}
-    <p>Select a role using the button in the top right corner.</p>
+    <p>Sign in using the button in the top right corner.</p>
   {/if}
 </div>
 """
