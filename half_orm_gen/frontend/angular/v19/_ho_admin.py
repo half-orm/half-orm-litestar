@@ -118,15 +118,16 @@ const VERB_COLOR: Record<string, string> = {{
                   @for (verb of verbs; track verb) {{
                     @let acc = getAccess(entry[0], verb);
                     @let inherited = isInherited(entry[0], verb);
+                    @let blocked = hasAncestorVerb(entry[0], verb);
                     @let hasAccess = !!(acc || inherited);
                     <div class="flex flex-col items-center gap-0.5 min-w-[52px]">
-                      <label class="flex items-center gap-1.5 select-none" [class]="inherited ? 'cursor-default opacity-60' : 'cursor-pointer'">
+                      <label class="flex items-center gap-1.5 select-none" [class]="blocked ? 'cursor-default opacity-60' : 'cursor-pointer'">
                         <input type="checkbox" [checked]="hasAccess"
-                               [disabled]="inherited"
-                               (change)="!inherited && toggleAccess(entry[0], verb, !acc)"
+                               [disabled]="blocked"
+                               (change)="!blocked && toggleAccess(entry[0], verb, !acc)"
                                class="rounded border-gray-300">
                         <span class="text-xs font-mono font-semibold" [class]="verbColor(verb)">{{{{ verb }}}}</span>
-                        @if (acc && hasConfigIssue(entry[0], verb)) {{
+                        @if (acc && hasConfigIssue(entry[0], verb) && !blocked) {{
                           <span class="text-amber-500 text-xs" title="No fields configured — requests will return 403">⚠</span>
                         }}
                       </label>
@@ -134,7 +135,7 @@ const VERB_COLOR: Record<string, string> = {{
                         <span class="text-[9px] text-gray-400">↑ {{{{ getInheritedAccess(entry[0], verb)!.from }}}}</span>
                       }}
                       @if (hasAccess && verb !== 'DELETE') {{
-                        <button (click)="togglePanel(entry[0], verb)"
+                        <button (click)="openPanel(entry[0], verb)"
                                 class="text-[10px] leading-tight transition-colors"
                                 [class]="isPanel(entry[0], verb)
                                   ? 'text-blue-600 font-semibold'
@@ -153,13 +154,6 @@ const VERB_COLOR: Record<string, string> = {{
                       <span class="text-xs font-semibold text-gray-500">
                         <span [class]="verbColor(panel()!.verb)">{{{{ panel()!.verb }}}}</span>
                         — field access
-                        @if (panelInheritedFrom()) {{
-                          <span class="ml-2 text-[10px] text-gray-400 font-normal">↑ inherited from <span class="font-semibold">{{{{ panelInheritedFrom() }}}}</span></span>
-                          <button (click)="overrideVerb(panel()!.resource, panel()!.verb)"
-                                  class="ml-3 text-[10px] px-2 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200">
-                            + define for {{{{ selectedRole() }}}}
-                          </button>
-                        }}
                       </span>
                       <button (click)="panel.set(null)"
                               class="text-gray-400 hover:text-gray-600 leading-none text-base">✕</button>
@@ -429,6 +423,10 @@ export class HoAdminComponent implements OnInit {{
     return !this.getAccess(resource, verb) && !!this.getInheritedAccess(resource, verb);
   }}
 
+  hasAncestorVerb(resource: string, verb: string): boolean {{
+    return !!this.getInheritedAccess(resource, verb);
+  }}
+
   verbColor(verb: string): string {{
     return VERB_COLOR[verb] ?? 'text-gray-600';
   }}
@@ -447,8 +445,16 @@ export class HoAdminComponent implements OnInit {{
     return p?.resource === resource && p?.verb === verb;
   }}
 
-  togglePanel(resource: string, verb: string): void {{
-    this.panel.set(this.isPanel(resource, verb) ? null : {{resource, verb}});
+  async openPanel(resource: string, verb: string): Promise<void> {{
+    if (this.isPanel(resource, verb)) {{
+      this.panel.set(null);
+      return;
+    }}
+    if (this.isInherited(resource, verb)) {{
+      await this.overrideVerb(resource, verb);
+    }} else {{
+      this.panel.set({{resource, verb}});
+    }}
   }}
 
   selectRole(name: string): void {{
